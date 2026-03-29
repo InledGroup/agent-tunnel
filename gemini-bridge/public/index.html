@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini Remote Bridge | Pro</title>
+    <title>Agent Tunnel | Pro</title>
     <!-- Fonts & Icons -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -200,12 +200,12 @@
         .log-type.sys { background: #3b82f622; color: var(--blue); }
         .log-content { white-space: pre-wrap; word-break: break-all; color: var(--text); flex: 1; line-height: 1.4; }
 
-        /* Loading Overlay */
+        /* Loading */
         #loading { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 20px; backdrop-filter: blur(2px); color: white; }
         .spinner { width: 32px; height: 32px; border: 3px solid var(--accent-muted); border-top-color: var(--text); border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* Status Styling */
+        /* Status */
         .status-badge { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-muted); }
         .status-dot.active { background: var(--green); box-shadow: 0 0 10px var(--green); }
@@ -224,34 +224,40 @@
     </div>
 
     <aside>
-        <div class="logo"><i data-lucide="zap" style="color: var(--blue)"></i> GEMINI BRIDGE</div>
+        <div class="logo"><i data-lucide="shield-check" style="color: var(--blue)"></i> AGENT TUNNEL</div>
 
         <section style="flex: 1; display: flex; flex-direction: column;">
-            <div class="section-label"><i class="fas fa-plug"></i> Saved Sessions</div>
+            <div class="section-label"><i class="fas fa-history"></i> Recent Sessions</div>
             <div id="session-list" class="session-list"></div>
-            <button onclick="newSession()" class="secondary" style="width:100%; margin-top:16px;"><i data-lucide="plus"></i> New Connection</button>
+            <button onclick="newSession()" class="secondary" style="width:100%; margin-top:16px;"><i data-lucide="plus"></i> New Tunnel</button>
         </section>
 
-        <section style="margin-top: 40px; display:flex; flex-direction:column; gap:20px;">
-            <div class="section-label"><i class="fas fa-cog"></i> Settings</div>
-            <div style="display:flex; align-items:center; justify-content:space-between; background:var(--bg); border:1px solid var(--border); padding:12px; border-radius:var(--radius);">
-                <span style="font-size:12px; font-weight:500;">Terminal Hook</span>
-                <label class="switch">
-                    <input type="checkbox" id="toggle-intercept" onchange="updateSettings()">
-                    <span class="slider"></span>
-                </label>
+        <section style="margin-top: 40px; display:flex; flex-direction:column; gap:16px;">
+            <div class="section-label"><i class="fas fa-sliders-h"></i> Global Settings</div>
+            
+            <div style="display:flex; flex-direction:column; gap:10px; background:var(--bg); border:1px solid var(--border); padding:12px; border-radius:var(--radius);">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <span style="font-size:11px; font-weight:500;">Terminal Hook</span>
+                    <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 18px;">
+                        <input type="checkbox" id="toggle-intercept" onchange="updateSettings()" style="opacity: 0; width: 0; height: 0;">
+                        <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--accent-muted); transition: .3s; border-radius: 34px;" id="slider-bg"></span>
+                    </label>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+                    <span style="font-size:10px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Instruction Filename</span>
+                    <input id="instruction_filename" onchange="updateSettings()" placeholder="GEMINI.md" style="font-size:11px; padding:6px 8px; font-family:'JetBrains Mono';">
+                </div>
             </div>
 
-            <div class="section-label"><i class="fas fa-signal"></i> Bridge Status</div>
+            <div class="section-label"><i class="fas fa-broadcast-tower"></i> Tunnel Status</div>
             <div class="status-badge">
                 <div id="status-dot" class="status-dot"></div>
                 <span id="status-text" style="font-size:12px; font-weight:600;">Offline</span>
             </div>
 
-            <!-- Global Sync Progress Bar -->
             <div id="sync-progress-box" class="sync-progress-container">
                 <div class="progress-label">
-                    <span id="sync-status-msg">Synchronizing...</span>
+                    <span id="sync-status-msg">Syncing...</span>
                     <span id="sync-percent">0%</span>
                 </div>
                 <div class="progress-bg"><div id="sync-bar" class="progress-fill"></div></div>
@@ -263,75 +269,79 @@
     <main>
         <div class="grid-2">
             <div class="card">
-                <div class="section-label"><i class="fas fa-server"></i> Server Details</div>
-                <div class="field"><label>Session Name</label><input id="session_name" placeholder="e.g. Production"></div>
-                <div class="field"><label>Host / IP</label><div class="input-group"><i class="fas fa-network-wired"></i><input id="host" class="input-with-icon" placeholder="192.168.1.1"></div></div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="field"><label>User</label><div class="input-group"><i class="fas fa-user"></i><input id="user" class="input-with-icon" placeholder="root"></div></div>
-                    <div class="field"><label>Password</label><div class="input-group"><i class="fas fa-key"></i><input type="password" id="pass" class="input-with-icon" placeholder="••••••••"></div></div>
+                <div class="section-label"><i class="fas fa-network-wired"></i> Remote Target</div>
+                <div class="field"><label>Friendly Name</label><input id="session_name" placeholder="e.g. Router-Lab"></div>
+                <div class="field"><label>Remote Host (IP or Domain)</label><div class="input-group"><i class="fas fa-globe"></i><input id="host" class="input-with-icon" placeholder="192.168.1.1"></div></div>
+                <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 16px;">
+                    <div class="field"><label>Username</label><div class="input-group"><i class="fas fa-user"></i><input id="user" class="input-with-icon" placeholder="root"></div></div>
+                    <div class="field"><label>Auth Password</label><div class="input-group"><i class="fas fa-shield-alt"></i><input type="password" id="pass" class="input-with-icon" placeholder="••••••••"></div></div>
                 </div>
-                <button onclick="testSSH()" class="secondary" id="btn-test" style="margin-top: 10px;"><i class="fas fa-vial"></i> Test Connection</button>
+                <button onclick="testSSH()" class="secondary" id="btn-test" style="margin-top: 10px;"><i class="fas fa-flask"></i> Verify SSH Access</button>
             </div>
 
             <div class="card">
-                <div class="section-label"><i class="fas fa-folder-tree"></i> Path Mapping</div>
+                <div class="section-label"><i class="fas fa-map-marked-alt"></i> Sync Map</div>
                 <div class="field">
-                    <label>Local Path</label>
+                    <label>Local Working Directory</label>
                     <div id="local-container" class="explorer-container">
                         <div class="explorer-header"><span class="explorer-path" id="local-nav">...</span><button class="ghost" onclick="toggleExpand('local-container')"><i data-lucide="maximize-2"></i></button></div>
-                        <div class="explorer-search"><input type="text" placeholder="Search..." oninput="filterExplorer('local-list', this.value)"></div>
+                        <div class="explorer-search"><input type="text" placeholder="Filter..." oninput="filterExplorer('local-list', this.value)"></div>
                         <div id="local-list" class="explorer-list"></div>
                     </div>
-                    <div id="local-sel" style="font-size:10px; margin-top:6px; color: var(--blue); font-family: monospace;">No folder selected</div>
+                    <div id="local-sel" style="font-size:10px; margin-top:6px; color: var(--blue); font-family: monospace;">Not mapped</div>
                 </div>
                 <div class="field">
-                    <label>Remote Path</label>
+                    <label>Remote Base Directory</label>
                     <div id="remote-container" class="explorer-container">
                         <div class="explorer-header"><span class="explorer-path" id="remote-nav">/</span><button class="ghost" onclick="toggleExpand('remote-container')"><i data-lucide="maximize-2"></i></button></div>
-                        <div class="explorer-search"><input type="text" placeholder="Search..." oninput="filterExplorer('remote-list', this.value)"></div>
+                        <div class="explorer-search"><input type="text" placeholder="Filter..." oninput="filterExplorer('remote-list', this.value)"></div>
                         <div id="remote-list" class="explorer-list"></div>
                     </div>
-                    <div id="remote-sel" style="font-size:10px; margin-top:6px; color: var(--blue); font-family: monospace;">No folder selected</div>
+                    <div id="remote-sel" style="font-size:10px; margin-top:6px; color: var(--blue); font-family: monospace;">Not mapped</div>
                 </div>
             </div>
         </div>
 
-        <button onclick="activateBridge()" class="primary" style="height: 54px; font-size: 15px;"><i class="fas fa-bolt"></i> START BRIDGE</button>
+        <button onclick="activateBridge()" class="primary" style="height: 54px; font-size: 15px; background: var(--blue); color: white;"><i class="fas fa-link"></i> ESTABLISH AGENT TUNNEL</button>
 
         <div class="terminal">
-            <div class="term-header"><span class="section-label" style="margin:0;"><i class="fas fa-terminal"></i> Activity Log</span><button class="ghost" onclick="clearLogs()"><i data-lucide="trash-2"></i> Clear</button></div>
+            <div class="term-header"><span class="section-label" style="margin:0; color:var(--text);"><i class="fas fa-stream"></i> Tunnel Traffic</span><button class="ghost" onclick="clearLogs()"><i data-lucide="eraser"></i></button></div>
             <div id="term-body" class="term-body"></div>
         </div>
     </main>
 
     <script>
-        let sessions = {}, selLocal = '', selRemote = '', explorersData = { 'local-list': [], 'remote-list': [] };
+        let sessions = {}, selLocal = '', selRemote = '', explorersData = { 'local-list': null, 'remote-list': null };
 
         async function init() {
             lucide.createIcons();
-            await loadConfigs();
             await loadSettings();
+            await loadConfigs();
             setupSSE();
-            setInterval(checkStatus, 2000); 
+            setInterval(checkStatus, 2500); 
             checkStatus();
             browseLocal('');
-        }
-
-        function toggleExpand(id) {
-            const el = document.getElementById(id);
-            el.classList.toggle('expanded');
-            lucide.createIcons();
         }
 
         async function loadSettings() {
             const r = await fetch('/api/settings');
             const settings = await r.json();
             document.getElementById('toggle-intercept').checked = settings.intercept_terminal;
+            document.getElementById('instruction_filename').value = settings.instruction_filename || 'GEMINI.md';
+            updateSliderUI();
         }
 
         async function updateSettings() {
             const intercept_terminal = document.getElementById('toggle-intercept').checked;
-            await fetch('/api/settings', { method: 'POST', body: JSON.stringify({ intercept_terminal }) });
+            const instruction_filename = document.getElementById('instruction_filename').value || 'GEMINI.md';
+            await fetch('/api/settings', { method: 'POST', body: JSON.stringify({ intercept_terminal, instruction_filename }) });
+            updateSliderUI();
+        }
+
+        function updateSliderUI() {
+            const chk = document.getElementById('toggle-intercept');
+            const slider = document.getElementById('slider-bg');
+            slider.style.backgroundColor = chk.checked ? 'var(--green)' : 'var(--accent-muted)';
         }
 
         function setupSSE() {
@@ -340,15 +350,15 @@
                 const data = JSON.parse(e.data);
                 if (data.type === 'system' || data.type === 'error') {
                     const txt = document.getElementById('loading-txt');
-                    if (txt) txt.innerText = (data.message || data.output || 'Processing...').substring(0, 50);
+                    if (txt) txt.innerText = (data.message || data.output || 'Connecting...').substring(0, 60);
                 }
                 const body = document.getElementById('term-body');
                 const line = document.createElement('div');
                 line.className = 'log-line';
-                let typeClass = 'sys', typeLabel = 'INFO', content = data.output || data.cmd || data.message || '';
-                if(data.type === 'command') { typeClass = 'exec'; typeLabel = 'EXEC'; }
-                if(data.type === 'result') { typeClass = data.exit_code === 0 ? 'out' : 'err'; typeLabel = 'OUT'; }
-                if(data.type === 'error') { typeClass = 'err'; typeLabel = 'ERR'; }
+                let typeClass = 'sys', typeLabel = 'TUNNEL', content = data.output || data.cmd || data.message || '';
+                if(data.type === 'command') { typeClass = 'exec'; typeLabel = 'REMOTE'; }
+                if(data.type === 'result') { typeClass = data.exit_code === 0 ? 'out' : 'err'; typeLabel = 'TRAFFIC'; }
+                if(data.type === 'error') { typeClass = 'err'; typeLabel = 'ERROR'; }
                 line.innerHTML = `<div class="log-type ${typeClass}">${typeLabel}</div><div class="log-content">${content.replace(/</g, '&lt;')}</div>`;
                 body.appendChild(line);
                 body.scrollTop = body.scrollHeight;
@@ -364,7 +374,7 @@
                 const s = sessions[name];
                 const div = document.createElement('div');
                 div.className = 'session-card';
-                div.innerHTML = `<span class="name">${name}</span><span class="host">${s.user}@${s.host}</span><button class="btn-del" onclick="deleteSession(event, '${name}')"><i class="fas fa-trash"></i></button>`;
+                div.innerHTML = `<span class="name">${name}</span><span class="host">${s.user}@${s.host}</span><button class="btn-del" onclick="deleteSession(event, '${name}')"><i class="fas fa-times"></i></button>`;
                 div.onclick = () => loadSession(name);
                 list.appendChild(div);
             });
@@ -397,8 +407,7 @@
         async function browseRemote(path = '/') {
             const host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
             if (!host || !user) return;
-            const config = { host, user, password: pass, remote_path: path };
-            const r = await fetch('/api/ls-remote', { method: 'POST', body: JSON.stringify(config) });
+            const r = await fetch('/api/ls-remote', { method: 'POST', body: JSON.stringify({ host, user, password: pass, remote_path: path }) });
             const data = await r.json();
             if (data.error) return;
             explorersData['remote-list'] = data;
@@ -412,8 +421,7 @@
             const list = explorersData[id];
             if (!list || !list.dirs) return;
             const filteredDirs = list.dirs.filter(d => d.toLowerCase().includes(query.toLowerCase()));
-            const data = { ...list, dirs: filteredDirs };
-            renderExp(id, data, id === 'local-list' ? browseLocal : browseRemote, (p) => {
+            renderExp(id, { ...list, dirs: filteredDirs }, id === 'local-list' ? browseLocal : browseRemote, (p) => {
                 if (id === 'local-list') { selLocal = p; document.getElementById('local-sel').innerText = p; }
                 else { selRemote = p; document.getElementById('remote-sel').innerText = p; }
             });
@@ -422,12 +430,12 @@
         function renderExp(id, data, onNav, onSel) {
             const el = document.getElementById(id); el.innerHTML = '';
             const up = document.createElement('div'); up.className = 'explorer-item'; 
-            up.innerHTML = '<i class="fas fa-level-up-alt"></i> .. (Go Up)';
+            up.innerHTML = '<i class="fas fa-chevron-up"></i> .. [Go Up]';
             up.onclick = () => { let p = data.current.split('/').filter(x=>x); p.pop(); onNav('/'+p.join('/')); };
             el.appendChild(up);
             
             const selCurrent = document.createElement('div'); selCurrent.className = 'explorer-item selected';
-            selCurrent.innerHTML = '<i class="fas fa-check-circle"></i> [Select Current Folder]';
+            selCurrent.innerHTML = '<i class="fas fa-crosshairs"></i> [Select This Folder]';
             selCurrent.onclick = () => { onSel(data.current); };
             el.appendChild(selCurrent);
 
@@ -440,87 +448,66 @@
         }
 
         async function checkStatus() {
-            const r = await fetch('/api/sessions');
-            const data = await r.json();
-            const out = data.output;
-            
-            const dot = document.getElementById('status-dot');
-            const txt = document.getElementById('status-text');
-            const progBox = document.getElementById('sync-progress-box');
-            
-            const isWatching = out.includes("Status: Watching for changes");
-            const isStaging = out.includes("Status: Staging") || out.includes("Status: Synchronizing") || out.includes("Status: Reconciling");
-            const isActive = out.includes("Name:");
-
-            if (isWatching) {
-                dot.className = 'status-dot active';
-                txt.innerText = 'Connected & Syncing';
-                progBox.style.display = 'none';
-            } else if (isStaging) {
-                dot.className = 'status-dot syncing';
-                txt.innerText = 'Initial Sync in Progress...';
-                progBox.style.display = 'block';
+            try {
+                const r = await fetch('/api/sessions');
+                const data = await r.json();
+                const out = data.output || '';
+                const dot = document.getElementById('status-dot');
+                const txt = document.getElementById('status-text');
+                const progBox = document.getElementById('sync-progress-box');
                 
-                const matchPercent = out.match(/(\d+)%/);
-                const matchEntries = out.match(/(\d+\/\d+ entries)/) || out.match(/(\d+ entries)/);
-                const statusMsg = out.match(/Status: ([^\n\(]+)/);
+                const isWatching = out.includes("Status: Watching for changes");
+                const isStaging = out.includes("Status: Staging") || out.includes("Status: Synchronizing") || out.includes("Status: Reconciling");
+                const isActive = out.includes("Name:");
 
-                if (matchPercent) {
-                    document.getElementById('sync-percent').innerText = matchPercent[0];
-                    document.getElementById('sync-bar').style.width = matchPercent[0];
+                if (isWatching) {
+                    dot.className = 'status-dot active'; txt.innerText = 'Tunnel Stable'; progBox.style.display = 'none';
+                } else if (isStaging) {
+                    dot.className = 'status-dot syncing'; txt.innerText = 'Syncing Assets...'; progBox.style.display = 'block';
+                    const matchPercent = out.match(/(\d+)%/), matchEntries = out.match(/(\d+\/\d+ entries)/) || out.match(/(\d+ entries)/), statusMsg = out.match(/Status: ([^\n\(]+)/);
+                    if (matchPercent) { document.getElementById('sync-percent').innerText = matchPercent[0]; document.getElementById('sync-bar').style.width = matchPercent[0]; }
+                    else { document.getElementById('sync-percent').innerText = '...'; document.getElementById('sync-bar').style.width = '100%'; }
+                    if (statusMsg) document.getElementById('sync-status-msg').innerText = statusMsg[1].trim();
+                    if (matchEntries) document.getElementById('sync-details').innerText = matchEntries[0];
+                } else if (isActive) {
+                    dot.className = 'status-dot syncing'; txt.innerText = 'Waking Tunnel...'; progBox.style.display = 'block';
                 } else {
-                    document.getElementById('sync-percent').innerText = 'Scanning...';
-                    document.getElementById('sync-bar').style.width = '100%';
+                    dot.className = 'status-dot'; txt.innerText = 'Idle'; progBox.style.display = 'none';
                 }
-                if (statusMsg) document.getElementById('sync-status-msg').innerText = statusMsg[1].trim();
-                if (matchEntries) document.getElementById('sync-details').innerText = matchEntries[0];
-            } else if (isActive) {
-                dot.className = 'status-dot syncing';
-                txt.innerText = 'Initializing...';
-                progBox.style.display = 'block';
-            } else {
-                dot.className = 'status-dot';
-                txt.innerText = 'Bridge Idle';
-                progBox.style.display = 'none';
-            }
+            } catch(e) {}
         }
 
         async function activateBridge() {
             const name = document.getElementById('session_name').value, host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
-            if (!name || !host || !user || !selLocal || !selRemote) { alert('Missing fields!'); return; }
+            if (!name || !host || !user || !selLocal || !selRemote) { alert('Fill all fields and select paths.'); return; }
             document.getElementById('loading').style.display = 'flex';
-            const config = { session_name: name, host, user, password: pass, local_path: selLocal, remote_path: selRemote };
             try {
-                const r = await fetch('/api/config', { method: 'POST', body: JSON.stringify(config) });
+                const r = await fetch('/api/config', { method: 'POST', body: JSON.stringify({ session_name: name, host, user, password: pass, local_path: selLocal, remote_path: selRemote }) });
                 document.getElementById('loading').style.display = 'none';
                 const data = await r.json();
                 if (data.status === 'warning') { alert(data.message); window.open('/help.html', '_blank'); }
-                else if (r.ok) { alert('Bridge Activated!'); }
-                else { alert('Failed: ' + data.message); window.open('/help.html', '_blank'); }
+                else if (r.ok) { alert('Agent Tunnel Online!'); }
+                else { alert('Tunnel Failure: ' + data.message); window.open('/help.html', '_blank'); }
                 loadConfigs();
             } catch(e) { document.getElementById('loading').style.display = 'none'; alert('Error: ' + e.message); window.open('/help.html', '_blank'); }
         }
 
         async function testSSH() {
             const host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
-            const btn = document.getElementById('btn-test'); btn.disabled = true; btn.innerText = 'Testing...';
+            const btn = document.getElementById('btn-test'); btn.disabled = true; btn.innerText = 'Checking...';
             try {
                 const r = await fetch('/api/test-ssh', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host, user, password: pass}) });
                 const data = await r.json();
-                alert(data.status === 'success' ? 'SSH OK!' : 'Failed: ' + data.message);
+                alert(data.status === 'success' ? 'SSH Access Confirmed!' : 'Access Denied: ' + data.message);
                 if(data.status === 'success') browseRemote('/');
             } catch(e) { alert('Error: ' + e.message); }
-            btn.disabled = false; btn.innerText = 'Test Connection';
+            btn.disabled = false; btn.innerText = 'Verify SSH Access';
         }
 
-        async function deleteSession(event, name) {
-            event.stopPropagation(); if (!confirm(`Delete session "${name}"?`)) return;
-            await fetch('/api/delete-session', { method: 'POST', body: JSON.stringify({ name }) });
-            loadConfigs();
-        }
-
+        function toggleExpand(id) { document.getElementById(id).classList.toggle('expanded'); lucide.createIcons(); }
+        async function deleteSession(event, name) { event.stopPropagation(); if (!confirm(`Delete ${name}?`)) return; await fetch('/api/delete-session', { method: 'POST', body: JSON.stringify({ name }) }); loadConfigs(); }
         function clearLogs() { document.getElementById('term-body').innerHTML = ''; }
-        function newSession() { document.querySelectorAll('input:not([type=checkbox])').forEach(i => i.value=''); selLocal=''; selRemote=''; document.getElementById('local-sel').innerText='No folder selected'; document.getElementById('remote-sel').innerText='No folder selected'; }
+        function newSession() { document.querySelectorAll('input:not([type=checkbox])').forEach(i => i.value=''); selLocal=''; selRemote=''; document.getElementById('local-sel').innerText='Not mapped'; document.getElementById('remote-sel').innerText='Not mapped'; }
 
         init();
     </script>

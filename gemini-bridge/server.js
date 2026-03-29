@@ -15,7 +15,7 @@ if (!fs.existsSync(CONFIGS_DIR)) fs.mkdirSync(CONFIGS_DIR, { recursive: true });
 
 let globalSettings = { 
     intercept_terminal: false,
-    instruction_filename: 'GEMINI.md'
+    instruction_filename: 'GEMINI.md' 
 };
 
 if (fs.existsSync(SETTINGS_FILE)) {
@@ -150,9 +150,7 @@ const server = http.createServer((req, res) => {
                             if (testErr || !testStdout.includes('success')) {
                                 logEmitter.emit('log', { type: 'error', message: '❌ SSH Key rejected. Direct Mode only.' });
                                 generateActivationFiles(validSessionName, config, originalSessionName, false);
-                                if (!res.writableEnded) {
-                                    res.writeHead(200); res.end(JSON.stringify({ status: 'warning', message: 'Connected without sync (Key rejected).' }));
-                                }
+                                res.writeHead(200); res.end(JSON.stringify({ status: 'warning', message: 'Connected without sync (Key rejected).' }));
                                 return;
                             }
 
@@ -164,12 +162,6 @@ const server = http.createServer((req, res) => {
                                     config.local_path, `${config.user}@${config.host}:${config.remote_path}`,
                                     '--sync-mode=two-way-resolved'
                                 ], { env: mutagenEnv });
-
-                                let errorBuf = '';
-                                mutagenProc.stderr.on('data', (d) => {
-                                    errorBuf += d.toString();
-                                    logEmitter.emit('log', { type: 'error', message: `Mutagen: ${d.toString().trim()}` });
-                                });
 
                                 mutagenProc.on('close', (code) => {
                                     const success = (code === 0);
