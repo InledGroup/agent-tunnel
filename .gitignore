@@ -11,7 +11,7 @@ gemini-bridge/server.log
 gemini-bridge/server.log.bak
 gemini-bridge/node_modules/
 remote_mount/
-
+gemini-bridge/public/_astro/
 # Environment & Secrets
 .env
 .env.local

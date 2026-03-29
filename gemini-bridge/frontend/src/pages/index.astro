@@ -1,0 +1,794 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Agent Tunnel | Pro">
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div id="loading-txt">CONNECTING...</div>
+        <button id="hide-loading-btn" class="secondary-btn">Hide Overlay</button>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <aside>
+        <div class="logo">
+            <img src="https://hosted.inled.es/agent-tunnel-churro.png" alt="Agent Tunnel Logo" width="32" height="32" />
+            <span>AGENT TUNNEL</span>
+        </div>
+
+        <section class="sessions-section" style="flex: 1; display: flex; flex-direction: column;">
+            <div class="section-label"><i class="fas fa-history"></i> Recent Sessions</div>
+            <div id="session-list" class="session-list"></div>
+            <button id="new-session-btn" class="secondary-btn animate-hover" style="width:100%; margin-top:16px;">
+                <i class="fas fa-plus"></i> New Tunnel
+            </button>
+        </section>
+
+        <section class="status-section" style="margin-top: 24px;">
+            <div class="section-label"><i class="fas fa-broadcast-tower"></i> Tunnel Status</div>
+            <div class="status-badge">
+                <div id="status-dot" class="status-dot"></div>
+                <span id="status-text">Offline</span>
+            </div>
+
+            <div id="sync-progress-box" class="sync-progress-container" style="display:none;">
+                <div class="progress-label">
+                    <span id="sync-status-msg">Syncing...</span>
+                    <span id="sync-percent">0%</span>
+                </div>
+                <div class="progress-bg"><div id="sync-bar" class="progress-fill"></div></div>
+                <div id="sync-details"></div>
+            </div>
+        </section>
+    </aside>
+
+    <main>
+        <div class="grid-layout">
+            <div class="left-column">
+                <div class="card fade-in">
+                    <div class="section-label"><i class="fas fa-network-wired"></i> Remote Target</div>
+                    <div class="field"><label>Friendly Name</label><input id="session_name" placeholder="e.g. Router-Lab"></div>
+                    <div class="field"><label>Remote Host (IP or Domain)</label>
+                        <div class="input-group"><i class="fas fa-globe"></i><input id="host" class="input-with-icon auto-connect" placeholder="192.168.1.1"></div>
+                    </div>
+                    <div class="grid-sub2">
+                        <div class="field"><label>Username</label>
+                            <div class="input-group"><i class="fas fa-user"></i><input id="user" class="input-with-icon auto-connect" placeholder="root"></div>
+                        </div>
+                        <div class="field"><label>Auth Password</label>
+                            <div class="input-group"><i class="fas fa-shield-alt"></i><input type="password" id="pass" class="input-with-icon auto-connect" placeholder="••••••••"></div>
+                        </div>
+                    </div>
+                    <button id="btn-test" class="secondary-btn animate-hover" style="margin-top: 10px;">
+                        <i class="fas fa-flask"></i> Verify SSH Access
+                    </button>
+                </div>
+
+                <div class="card fade-in" style="margin-top: 24px;">
+                    <div class="section-label"><i class="fas fa-sliders-h"></i> Global Settings</div>
+                    <div class="settings-grid">
+                        <div class="setting-item">
+                            <span class="setting-name">Terminal Hook</span>
+                            <label class="switch">
+                                <input type="checkbox" id="toggle-intercept">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="field">
+                            <label>Instruction Filename</label>
+                            <input id="instruction_filename" placeholder="GEMINI.md" style="font-family:'JetBrains Mono';">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="right-column">
+                <div class="card fade-in">
+                    <div class="section-label"><i class="fas fa-map-marked-alt"></i> Sync Map</div>
+                    <div class="field">
+                        <label>Local Working Directory</label>
+                        <div id="local-container" class="explorer-container">
+                            <div class="explorer-header">
+                                <span class="explorer-path" id="local-nav">...</span>
+                                <div id="local-spinner" class="spinner small" style="display:none;"></div>
+                                <button class="ghost-btn" data-target="local-container"><i class="fas fa-expand-alt"></i></button>
+                            </div>
+                            <div class="explorer-search"><input type="text" placeholder="Filter..." class="exp-filter" data-list="local-list"></div>
+                            <div id="local-list" class="explorer-list"></div>
+                        </div>
+                        <div id="local-sel" class="selection-path">Not mapped</div>
+                    </div>
+                    <div class="field">
+                        <label>Remote Base Directory</label>
+                        <div id="remote-container" class="explorer-container">
+                            <div class="explorer-header">
+                                <span class="explorer-path" id="remote-nav">/</span>
+                                <div id="remote-spinner" class="spinner small" style="display:none;"></div>
+                                <button class="ghost-btn" data-target="remote-container"><i class="fas fa-expand-alt"></i></button>
+                            </div>
+                            <div class="explorer-search"><input type="text" placeholder="Filter..." class="exp-filter" data-list="remote-list"></div>
+                            <div id="remote-list" class="explorer-list"></div>
+                        </div>
+                        <div id="remote-sel" class="selection-path">Not mapped</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="action-bar fade-in">
+            <button id="btn-establish" class="primary-btn animate-hover"><i class="fas fa-link"></i> ESTABLISH TUNNEL</button>
+            <button id="btn-stop" class="danger-btn animate-hover" disabled><i class="fas fa-stop-circle"></i> STOP</button>
+        </div>
+
+        <div class="terminal fade-in">
+            <div class="term-header">
+                <span class="section-label" style="margin:0; color:var(--text);"><i class="fas fa-stream"></i> Tunnel Traffic</span>
+                <button id="clear-logs-btn" class="ghost-btn"><i class="fas fa-eraser"></i></button>
+            </div>
+            <div id="term-body" class="term-body"></div>
+        </div>
+    </main>
+
+    <script>
+        let sessions = {}, selLocal = '', selRemote = '', explorersData = { 'local-list': null, 'remote-list': null };
+        let currentStatus = { active: false, name: '' };
+        let autoConnectTimer = null;
+        let selectedSessionName = '';
+
+        async function init() {
+            lucide.createIcons();
+            await loadSettings();
+            await loadConfigs();
+            setupSSE();
+            setInterval(checkStatus, 2500); 
+            checkStatus();
+            browseLocal('');
+            setupEventListeners();
+        }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            const icon = type === 'success' ? 'fa-check-circle' : (type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle');
+            toast.innerHTML = `<i class="fas ${icon}"></i> <span>${message}</span>`;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-20px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function setupEventListeners() {
+            document.getElementById('new-session-btn').onclick = newSession;
+            document.getElementById('btn-test').onclick = testSSH;
+            document.getElementById('btn-establish').onclick = activateBridge;
+            document.getElementById('btn-stop').onclick = stopBridge;
+            document.getElementById('clear-logs-btn').onclick = () => document.getElementById('term-body').innerHTML = '';
+            document.getElementById('hide-loading-btn').onclick = () => document.getElementById('loading-overlay').style.display = 'none';
+            document.getElementById('toggle-intercept').onchange = updateSettings;
+            document.getElementById('instruction_filename').onchange = updateSettings;
+
+            document.querySelectorAll('.auto-connect').forEach(input => {
+                input.addEventListener('input', () => {
+                    clearTimeout(autoConnectTimer);
+                    autoConnectTimer = setTimeout(autoBrowseRemote, 1000);
+                });
+            });
+
+            document.querySelectorAll('.ghost-btn[data-target]').forEach(btn => {
+                btn.onclick = () => {
+                    const target = document.getElementById(btn.dataset.target);
+                    target.classList.toggle('expanded');
+                };
+            });
+
+            document.querySelectorAll('.exp-filter').forEach(input => {
+                input.addEventListener('input', (e) => filterExplorer(input.dataset.list, e.target.value));
+            });
+        }
+
+        async function loadSettings() {
+            const r = await fetch('/api/settings');
+            const settings = await r.json();
+            document.getElementById('toggle-intercept').checked = settings.intercept_terminal;
+            document.getElementById('instruction_filename').value = settings.instruction_filename || 'GEMINI.md';
+        }
+
+        async function updateSettings() {
+            const intercept_terminal = document.getElementById('toggle-intercept').checked;
+            const instruction_filename = document.getElementById('instruction_filename').value || 'GEMINI.md';
+            await fetch('/api/settings', { method: 'POST', body: JSON.stringify({ intercept_terminal, instruction_filename }) });
+            showToast('Settings saved', 'info');
+        }
+
+        function setupSSE() {
+            const ev = new EventSource('/api/log-stream');
+            ev.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                if (data.type === 'system' || data.type === 'error') {
+                    const txt = document.getElementById('loading-txt');
+                    if (txt) txt.innerText = (data.message || data.output || 'Connecting...').substring(0, 60);
+                }
+                const body = document.getElementById('term-body');
+                const line = document.createElement('div');
+                line.className = 'log-line';
+                let typeClass = 'sys', typeLabel = 'TUNNEL', content = data.output || data.cmd || data.message || '';
+                if(data.type === 'command') { typeClass = 'exec'; typeLabel = 'REMOTE'; }
+                if(data.type === 'result') { typeClass = data.exit_code === 0 ? 'out' : 'err'; typeLabel = 'TRAFFIC'; }
+                if(data.type === 'error') { typeClass = 'err'; typeLabel = 'ERROR'; }
+                line.innerHTML = `<div class="log-type ${typeClass}">${typeLabel}</div><div class="log-content">${content.replace(/</g, '&lt;')}</div>`;
+                body.appendChild(line);
+                body.scrollTop = body.scrollHeight;
+            };
+        }
+
+        async function loadConfigs() {
+            const r = await fetch('/api/get-configs');
+            sessions = await r.json();
+            renderSessionList();
+        }
+
+        function renderSessionList() {
+            const list = document.getElementById('session-list');
+            list.innerHTML = '';
+            Object.keys(sessions).forEach(name => {
+                const s = sessions[name];
+                const isActive = currentStatus.name === name && currentStatus.active;
+                const isSelected = selectedSessionName === name;
+                
+                const div = document.createElement('div');
+                div.className = `session-card ${isActive ? 'active-session' : ''} ${isSelected ? 'active-ui' : ''}`;
+                div.innerHTML = `
+                    <div class="session-info">
+                        ${isActive ? '<div class="active-dot"></div>' : '<div class="inactive-dot"></div>'}
+                        <div class="session-text">
+                            <span class="name">${name}</span>
+                            <span class="host">${s.user}@${s.host}</span>
+                        </div>
+                    </div>
+                    <button class="btn-del" data-name="${name}"><i class="fas fa-times"></i></button>
+                `;
+                div.onclick = (e) => {
+                    if (e.target.closest('.btn-del')) return;
+                    loadSession(name, div);
+                };
+                div.querySelector('.btn-del').onclick = (e) => {
+                    e.stopPropagation();
+                    deleteSession(name);
+                };
+                list.appendChild(div);
+            });
+        }
+
+        function loadSession(name, element) {
+            selectedSessionName = name;
+            const s = sessions[name];
+            document.getElementById('session_name').value = name;
+            document.getElementById('host').value = s.host;
+            document.getElementById('user').value = s.user;
+            document.getElementById('pass').value = s.password || '';
+            selLocal = s.local_path; selRemote = s.remote_path;
+            document.getElementById('local-sel').innerText = selLocal;
+            document.getElementById('remote-sel').innerText = selRemote;
+            
+            browseLocal(selLocal); 
+            browseRemote(selRemote);
+            
+            document.querySelectorAll('.session-card').forEach(c => c.classList.remove('active-ui'));
+            if (element) element.classList.add('active-ui');
+            
+            updateStopButton();
+            showToast(`Loaded session: ${name}`, 'info');
+        }
+
+        async function browseLocal(path) {
+            document.getElementById('local-spinner').style.display = 'block';
+            try {
+                const r = await fetch('/api/ls-local', { method: 'POST', body: JSON.stringify({ path }) });
+                const data = await r.json();
+                explorersData['local-list'] = data;
+                document.getElementById('local-nav').innerText = data.current;
+                selLocal = data.current;
+                document.getElementById('local-sel').innerText = selLocal;
+                renderExp('local-list', data, browseLocal, (p) => { 
+                    selLocal = p; 
+                    document.getElementById('local-sel').innerText = p;
+                    showToast(`Selected local folder: ${p.split('/').pop() || '/'}`, 'success');
+                });
+            } finally {
+                document.getElementById('local-spinner').style.display = 'none';
+            }
+        }
+
+        async function autoBrowseRemote() {
+            const host = document.getElementById('host').value, user = document.getElementById('user').value;
+            if (host && user) browseRemote('/');
+        }
+
+        async function browseRemote(path = '/') {
+            const host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
+            if (!host || !user) return;
+            document.getElementById('remote-spinner').style.display = 'block';
+            try {
+                const r = await fetch('/api/ls-remote', { method: 'POST', body: JSON.stringify({ host, user, password: pass, remote_path: path }) });
+                const data = await r.json();
+                if (data.error) {
+                    showToast(`Remote Error: ${data.error}`, 'error');
+                    return;
+                }
+                explorersData['remote-list'] = data;
+                document.getElementById('remote-nav').innerText = data.current;
+                selRemote = data.current;
+                document.getElementById('remote-sel').innerText = selRemote;
+                renderExp('remote-list', data, browseRemote, (p) => { 
+                    selRemote = p; 
+                    document.getElementById('remote-sel').innerText = p;
+                    showToast(`Selected remote folder: ${p.split('/').pop() || '/'}`, 'success');
+                });
+            } finally {
+                document.getElementById('remote-spinner').style.display = 'none';
+            }
+        }
+
+        function filterExplorer(id, query) {
+            const list = explorersData[id];
+            if (!list || !list.dirs) return;
+            const filteredDirs = list.dirs.filter(d => d.toLowerCase().includes(query.toLowerCase()));
+            renderExp(id, { ...list, dirs: filteredDirs }, id === 'local-list' ? browseLocal : browseRemote, (p) => {
+                if (id === 'local-list') { selLocal = p; document.getElementById('local-sel').innerText = p; }
+                else { selRemote = p; document.getElementById('remote-sel').innerText = p; }
+            });
+        }
+
+        function renderExp(id, data, onNav, onSel) {
+            const el = document.getElementById(id); el.innerHTML = '';
+            
+            const up = document.createElement('div'); up.className = 'explorer-item'; 
+            up.innerHTML = '<i class="fas fa-chevron-up"></i> .. [Go Up]';
+            up.onclick = () => { let p = data.current.split('/').filter(x=>x); p.pop(); onNav('/'+p.join('/')); };
+            el.appendChild(up);
+            
+            const selCurrent = document.createElement('div'); selCurrent.className = 'explorer-item selected';
+            selCurrent.innerHTML = '<i class="fas fa-crosshairs"></i> [Select Folder]';
+            selCurrent.onclick = () => { onSel(data.current); };
+            el.appendChild(selCurrent);
+            
+            data.dirs.forEach(d => {
+                const item = document.createElement('div'); item.className = 'explorer-item folder'; 
+                item.innerHTML = '<i class="fas fa-folder"></i> ' + d;
+                item.onclick = () => onNav(data.current + (data.current.endsWith('/') ? '' : '/') + d);
+                el.appendChild(item);
+            });
+        }
+
+        async function checkStatus() {
+            try {
+                const r = await fetch('/api/sessions');
+                const data = await r.json();
+                const out = data.output || '';
+                const dot = document.getElementById('status-dot');
+                const txt = document.getElementById('status-text');
+                const progBox = document.getElementById('sync-progress-box');
+                
+                const isWatching = out.includes("Status: Watching for changes");
+                const isStaging = out.includes("Status: Staging") || out.includes("Status: Synchronizing") || out.includes("Status: Reconciling");
+                const isActive = out.includes("Name:");
+
+                const nameMatch = out.match(/Name: "([^"]+)"/);
+                const prevActive = currentStatus.active;
+                currentStatus.active = isActive || isWatching || isStaging;
+                currentStatus.name = nameMatch ? nameMatch[1] : '';
+
+                if (currentStatus.active && !prevActive) {
+                    showToast(`Tunnel "${currentStatus.name}" is now online`, 'success');
+                }
+
+                if (isWatching) {
+                    dot.className = 'status-dot active'; txt.innerText = 'Stable Connection'; progBox.style.display = 'none';
+                } else if (isStaging) {
+                    dot.className = 'status-dot syncing'; txt.innerText = 'Synchronizing...'; progBox.style.display = 'block';
+                    const matchPercent = out.match(/(\d+)%/), matchEntries = out.match(/(\d+\/\d+ entries)/) || out.match(/(\d+ entries)/), statusMsg = out.match(/Status: ([^\n\(]+)/);
+                    if (matchPercent) { document.getElementById('sync-percent').innerText = matchPercent[0]; document.getElementById('sync-bar').style.width = matchPercent[0]; }
+                    else { document.getElementById('sync-percent').innerText = '...'; document.getElementById('sync-bar').style.width = '100%'; }
+                    if (statusMsg) document.getElementById('sync-status-msg').innerText = statusMsg[1].trim();
+                    if (matchEntries) document.getElementById('sync-details').innerText = matchEntries[0];
+                } else if (isActive) {
+                    dot.className = 'status-dot syncing'; txt.innerText = 'Establishing...'; progBox.style.display = 'block';
+                } else {
+                    dot.className = 'status-dot'; txt.innerText = 'Offline'; progBox.style.display = 'none';
+                }
+
+                updateStopButton();
+                renderSessionList();
+            } catch(e) {}
+        }
+
+        function updateStopButton() {
+            const btnStop = document.getElementById('btn-stop');
+            const currentInputName = document.getElementById('session_name').value;
+            if (currentStatus.active && currentStatus.name === currentInputName) {
+                btnStop.disabled = false;
+                btnStop.classList.add('active-danger');
+            } else {
+                btnStop.disabled = true;
+                btnStop.classList.remove('active-danger');
+            }
+        }
+
+        async function activateBridge() {
+            const name = document.getElementById('session_name').value, host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
+            if (!name || !host || !user || !selLocal || !selRemote) { 
+                showToast('Please fill all fields and select both paths', 'error');
+                return; 
+            }
+            document.getElementById('loading-overlay').style.display = 'flex';
+            try {
+                const r = await fetch('/api/config', { method: 'POST', body: JSON.stringify({ session_name: name, host, user, password: pass, local_path: selLocal, remote_path: selRemote }) });
+                document.getElementById('loading-overlay').style.display = 'none';
+                const data = await r.json();
+                if (data.status === 'warning') { 
+                    showToast(data.message, 'info'); 
+                } else if (r.ok) { 
+                    showToast('Establishing Tunnel...', 'success'); 
+                } else { 
+                    showToast('Tunnel Failure: ' + data.message, 'error'); 
+                }
+                loadConfigs();
+            } catch(e) { 
+                document.getElementById('loading-overlay').style.display = 'none'; 
+                showToast('Error: ' + e.message, 'error'); 
+            }
+        }
+
+        async function stopBridge() {
+            const name = document.getElementById('session_name').value;
+            if (!name) return;
+            if (!confirm(`Stop tunnel for "${name}"?`)) return;
+            
+            try {
+                const r = await fetch('/api/stop-session', { method: 'POST', body: JSON.stringify({ name }) });
+                const data = await r.json();
+                if (r.ok) {
+                    showToast('Tunnel Stopped', 'success');
+                    currentStatus.active = false;
+                    currentStatus.name = '';
+                    updateStopButton();
+                    renderSessionList();
+                } else showToast('Error: ' + data.message, 'error');
+                checkStatus();
+            } catch(e) { showToast('Error: ' + e.message, 'error'); }
+        }
+
+        async function testSSH() {
+            const host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
+            if (!host || !user) {
+                showToast('Enter host and user first', 'error');
+                return;
+            }
+            const btn = document.getElementById('btn-test'); btn.disabled = true; btn.innerText = 'Checking...';
+            try {
+                const r = await fetch('/api/test-ssh', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host, user, password: pass}) });
+                const data = await r.json();
+                if (data.status === 'success') {
+                    showToast('SSH Access Confirmed!', 'success');
+                    browseRemote('/');
+                } else {
+                    showToast('Access Denied: ' + data.message, 'error');
+                }
+            } catch(e) { showToast('Error: ' + e.message, 'error'); }
+            btn.disabled = false; btn.innerText = 'Verify SSH Access';
+        }
+
+        async function deleteSession(name) { 
+            if (!confirm(`Delete ${name}?`)) return; 
+            await fetch('/api/delete-session', { method: 'POST', body: JSON.stringify({ name }) }); 
+            showToast(`Deleted ${name}`, 'info');
+            loadConfigs(); 
+        }
+
+        function newSession() { 
+            selectedSessionName = '';
+            document.querySelectorAll('input:not([type=checkbox])').forEach(i => i.value=''); 
+            selLocal=''; selRemote=''; 
+            document.getElementById('local-sel').innerText='Not mapped'; 
+            document.getElementById('remote-sel').innerText='Not mapped'; 
+            document.querySelectorAll('.session-card').forEach(c => c.classList.remove('active-ui'));
+            updateStopButton();
+            showToast('Ready for new tunnel', 'info');
+        }
+
+        init();
+    </script>
+</Layout>
+
+<style>
+    aside { 
+        width: var(--sidebar-width); 
+        background: var(--surface); 
+        border-right: 1px solid var(--border); 
+        display: flex; 
+        flex-direction: column; 
+        padding: 24px;
+        flex-shrink: 0;
+    }
+
+    .logo { 
+        font-size: 18px; 
+        font-weight: 800; 
+        display: flex; 
+        align-items: center; 
+        gap: 12px; 
+        margin-bottom: 32px;
+        color: var(--accent);
+    }
+
+    .section-label { 
+        font-size: 11px; 
+        font-weight: 700; 
+        text-transform: uppercase; 
+        color: var(--text-muted); 
+        letter-spacing: 0.05em; 
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .session-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; }
+    
+    .session-card { 
+        background: var(--bg); 
+        border: 1px solid var(--border); 
+        border-radius: var(--radius); 
+        padding: 12px; 
+        cursor: pointer; 
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); 
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+    }
+    
+    .session-card:hover { 
+        border-color: var(--accent); 
+        background: var(--surface-hover);
+        transform: translateX(4px);
+    }
+    
+    .session-card:active {
+        transform: scale(0.98) translateX(4px);
+    }
+    
+    .session-card.active-ui { 
+        border-color: var(--accent); 
+        background: var(--accent-muted); 
+        box-shadow: 0 0 15px rgba(255, 130, 5, 0.1);
+    }
+    
+    .session-info { display: flex; align-items: center; gap: 10px; }
+    .active-dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; box-shadow: 0 0 8px var(--green); }
+    .inactive-dot { width: 8px; height: 8px; background: var(--border); border-radius: 50%; }
+    
+    .session-text .name { font-size: 13px; font-weight: 600; display: block; color: var(--text); }
+    .session-text .host { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+    
+    .btn-del { 
+        background: none; border: none; color: var(--text-muted); 
+        cursor: pointer; padding: 6px; font-size: 12px; transition: 0.2s;
+        opacity: 0;
+        border-radius: 4px;
+    }
+    .session-card:hover .btn-del { opacity: 1; }
+    .btn-del:hover { color: var(--red); background: rgba(239, 68, 68, 0.1); }
+
+    main { 
+        flex: 1; 
+        overflow-y: auto; 
+        padding: 40px; 
+        display: flex; 
+        flex-direction: column; 
+        gap: 24px; 
+        width: 100%;
+    }
+
+    .grid-layout { display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px; }
+    
+    .card { 
+        background: var(--surface); 
+        border: 1px solid var(--border); 
+        border-radius: var(--radius); 
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .field { display: flex; flex-direction: column; gap: 8px; }
+    .field label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+    
+    input { 
+        background: var(--bg); 
+        border: 1px solid var(--border); 
+        border-radius: var(--radius); 
+        color: var(--text); 
+        padding: 10px 12px; 
+        font-size: 13px; 
+        width: 100%; 
+        transition: 0.2s;
+        font-family: 'Inter', sans-serif;
+    }
+    .input-with-icon { padding-left: 36px; }
+    .input-group { position: relative; }
+    .input-group i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 14px; }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-muted); }
+
+    .grid-sub2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    button { 
+        padding: 12px 16px; 
+        border-radius: var(--radius); 
+        font-size: 13px; 
+        font-weight: 600; 
+        cursor: pointer; 
+        border: 1px solid var(--border); 
+        display: inline-flex; 
+        align-items: center; 
+        justify-content: center; 
+        gap: 8px; 
+        user-select: none;
+    }
+
+    .primary-btn { background: var(--accent); color: white; border: none; }
+    .primary-btn:hover { background: #e67504; box-shadow: 0 4px 15px rgba(255, 130, 5, 0.3); }
+    
+    .secondary-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .secondary-btn:hover { background: var(--surface-hover); border-color: var(--text-muted); }
+    
+    .danger-btn { background: #3d1414; color: #fca5a5; border-color: #5d1d1d; }
+    .danger-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .danger-btn.active-danger { background: var(--red); color: white; border: none; }
+    .danger-btn.active-danger:hover { background: #dc2626; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3); }
+
+    .ghost-btn { background: transparent; border: none; color: var(--text-muted); padding: 4px 8px; font-size: 14px; }
+    .ghost-btn:hover { color: var(--text); background: var(--surface-hover); }
+
+    .settings-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .setting-item { display: flex; align-items: center; justify-content: space-between; }
+    .setting-name { font-size: 13px; font-weight: 500; }
+
+    /* Explorer */
+    .explorer-container { 
+        background: var(--bg); 
+        border: 1px solid var(--border); 
+        border-radius: var(--radius); 
+        overflow: hidden; 
+        display: flex;
+        flex-direction: column;
+        transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        height: 200px;
+    }
+    .explorer-container.expanded { height: 450px; }
+    .explorer-header { padding: 8px 12px; background: var(--surface-hover); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .explorer-path { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .explorer-search { padding: 8px; border-bottom: 1px solid var(--border); }
+    .explorer-search input { padding: 6px 10px; font-size: 12px; background: var(--surface); }
+    
+    .explorer-list { flex: 1; overflow-y: auto; padding: 4px; }
+    
+    .explorer-item { 
+        padding: 8px 12px; 
+        font-size: 12px; 
+        border-radius: 4px; 
+        cursor: pointer; 
+        display: flex; 
+        align-items: center; 
+        gap: 10px; 
+        transition: 0.15s;
+        user-select: none;
+    }
+    
+    .explorer-item:hover { 
+        background: var(--surface-hover); 
+        color: var(--accent); 
+        padding-left: 16px;
+    }
+    
+    .explorer-item:active {
+        background: var(--accent-muted);
+        transform: scale(0.99);
+    }
+    
+    .explorer-item i { color: var(--text-muted); font-size: 14px; transition: 0.15s; }
+    .explorer-item:hover i { color: var(--accent); }
+    .explorer-item.folder i { color: var(--accent); }
+    
+    .explorer-item.selected { 
+        background: var(--accent-muted); 
+        color: var(--accent); 
+        font-weight: 600; 
+        border: 1px dashed var(--accent);
+    }
+
+    .selection-path { font-size:10px; margin-top:6px; color: var(--accent); font-family: 'JetBrains Mono', monospace; }
+
+    .spinner.small { width: 14px; height: 14px; border-width: 2px; }
+
+    .action-bar { display: flex; gap: 16px; margin-top: 8px; }
+    .action-bar button { flex: 1; height: 54px; font-size: 15px; letter-spacing: 0.5px; }
+
+    /* Terminal */
+    .terminal { background: #0c0c0c; border: 1px solid var(--border); border-radius: var(--radius); font-family: 'JetBrains Mono', monospace; font-size: 12px; height: 300px; display: flex; flex-direction: column; }
+    .term-header { padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .term-body { padding: 16px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .log-line { display: flex; gap: 12px; padding: 2px 0; border-bottom: 1px solid #151515; }
+    .log-type { font-weight: 700; font-size: 9px; padding: 2px 6px; border-radius: 3px; height: fit-content; text-transform: uppercase; margin-top: 2px; }
+    .log-type.exec { background: var(--accent-muted); color: var(--accent); }
+    .log-type.out { background: rgba(34, 197, 94, 0.1); color: var(--green); }
+    .log-type.err { background: rgba(239, 68, 68, 0.1); color: var(--red); }
+    .log-type.sys { background: rgba(59, 130, 246, 0.1); color: var(--blue); }
+    .log-content { white-space: pre-wrap; word-break: break-all; color: #bbb; flex: 1; line-height: 1.4; }
+
+    /* Progress */
+    .sync-progress-container { margin-top: 20px; }
+    .progress-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 6px; font-weight: 700; text-transform: uppercase; }
+    .progress-bg { background: var(--border); height: 6px; border-radius: 10px; overflow: hidden; }
+    .progress-fill { background: var(--accent); height: 100%; width: 0%; transition: width 0.5s ease; box-shadow: 0 0 10px var(--accent); }
+    #sync-details { font-size: 9px; color: var(--text-muted); margin-top: 6px; font-family: 'JetBrains Mono'; }
+
+    /* Loading Overlay */
+    #loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 1000; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 20px; backdrop-filter: blur(4px); }
+    #loading-txt { font-size: 14px; font-weight: 600; color: var(--accent); letter-spacing: 1px; }
+
+    /* Toast Notifications */
+    #toast-container { position: fixed; top: 24px; right: 24px; display: flex; flex-direction: column; gap: 12px; z-index: 2000; }
+    .toast { 
+        min-width: 280px; 
+        padding: 16px 20px; 
+        background: var(--surface); 
+        border-left: 4px solid var(--accent); 
+        border-radius: var(--radius); 
+        color: var(--text); 
+        box-shadow: 0 10px 25px rgba(0,0,0,0.4); 
+        display: flex; 
+        align-items: center; 
+        gap: 12px; 
+        font-size: 14px;
+        font-weight: 500;
+        animation: toastIn 0.3s ease-out forwards;
+        transition: 0.3s;
+    }
+    .toast-success { border-left-color: var(--green); }
+    .toast-error { border-left-color: var(--red); }
+    .toast-info { border-left-color: var(--blue); }
+    .toast i { font-size: 16px; }
+    .toast-success i { color: var(--green); }
+    .toast-error i { color: var(--red); }
+    .toast-info i { color: var(--blue); }
+
+    @keyframes toastIn {
+        from { opacity: 0; transform: translateX(50px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Status Dot */
+    .status-badge { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 8px; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+    .status-dot.active { background: var(--green); box-shadow: 0 0 12px var(--green); }
+    .status-dot.syncing { background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+
+    /* Switch */
+    .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .3s; border-radius: 34px; }
+    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+    input:checked + .slider { background-color: var(--accent); }
+    input:checked + .slider:before { transform: translateX(18px); }
+</style>
