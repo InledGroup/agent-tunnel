@@ -46,6 +46,7 @@ if (fs.existsSync(SETTINGS_FILE)) {
 }
 
 const logEmitter = new events.EventEmitter();
+let activeSshSessions = {}; // Rastrear sesiones SSH activas por nombre
 
 function ensureSshKey() {
     const sshDir = path.join(os.homedir(), '.ssh');
@@ -217,6 +218,7 @@ const server = http.createServer((req, res) => {
 
                             if (!useMutagen) {
                                 logEmitter.emit('log', { type: 'system', message: '✅ Key validated. SSH-Only Mode (Mutagen disabled).' });
+                                activeSshSessions[validSessionName] = { host: config.host, user: config.user, hasMutagen: false };
                                 generateActivationFiles(validSessionName, config, originalSessionName, false);
                                 res.writeHead(200); res.end(JSON.stringify({ status: 'success', message: 'SSH Connection established (No sync).' }));
                                 return;
@@ -233,6 +235,7 @@ const server = http.createServer((req, res) => {
 
                                 mutagenProc.on('close', (code) => {
                                     const success = (code === 0);
+                                    if (success) activeSshSessions[validSessionName] = { host: config.host, user: config.user, hasMutagen: true };
                                     generateActivationFiles(validSessionName, config, originalSessionName, success);
                                     logEmitter.emit('log', { type: 'system', message: success ? '✨ Tunnel & Sync active!' : '⚠️ Sync failed. Direct Mode only.' });
                                     if (!res.writableEnded) {
@@ -255,6 +258,29 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Cleanup local files (Deactivate bridge)
+    if (req.url === '/api/cleanup-local' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const { local_path } = JSON.parse(body);
+                if (local_path && fs.existsSync(local_path)) {
+                    const files = ['activate.sh', globalSettings.instruction_filename || 'GEMINI.md'];
+                    files.forEach(f => {
+                        const p = path.join(local_path, f);
+                        if (fs.existsSync(p)) fs.unlinkSync(p);
+                    });
+                    logEmitter.emit('log', { type: 'system', message: `🧹 Cleaned up activation files in ${local_path}` });
+                }
+                res.writeHead(200); res.end(JSON.stringify({ status: 'success' }));
+            } catch(e) {
+                res.writeHead(500); res.end(JSON.stringify({ status: 'error', message: e.message }));
+            }
+        });
+        return;
+    }
+
     // API: Detener Sesión
     if (req.url === '/api/stop-session' && req.method === 'POST') {
         let body = '';
@@ -264,6 +290,7 @@ const server = http.createServer((req, res) => {
             const identifier = id || name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
             
             logEmitter.emit('log', { type: 'system', message: `🛑 Terminating tunnel: ${name}...` });
+            delete activeSshSessions[identifier];
             
             exec(`mutagen sync terminate "${identifier}"`, (err, stdout, stderr) => {
                 if (err) {
@@ -394,7 +421,10 @@ const server = http.createServer((req, res) => {
     if (req.url === '/api/sessions') {
         exec('mutagen sync list', (err, stdout) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ output: stdout || '' }));
+            res.end(JSON.stringify({ 
+                output: stdout || '',
+                activeSsh: activeSshSessions 
+            }));
         });
         return;
     }

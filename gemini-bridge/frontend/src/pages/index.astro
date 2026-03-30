@@ -182,6 +182,17 @@ import Layout from '../layouts/Layout.astro';
             checkStatus();
             browseLocal('');
             setupEventListeners();
+
+            // Restaurar última sesión guardada en el navegador
+            const lastSession = localStorage.getItem('last_session');
+            if (lastSession && sessions[lastSession]) {
+                const sessionCards = document.querySelectorAll('.session-card');
+                let targetCard = null;
+                sessionCards.forEach(c => {
+                    if (c.querySelector('.name').innerText === lastSession) targetCard = c;
+                });
+                loadSession(lastSession, targetCard);
+            }
         }
 
         function showToast(message, type = 'success') {
@@ -319,6 +330,7 @@ import Layout from '../layouts/Layout.astro';
 
         function loadSession(name, element) {
             selectedSessionName = name;
+            localStorage.setItem('last_session', name); // Guardar para persistencia
             const s = sessions[name];
             document.getElementById('session_name').value = name;
             document.getElementById('host').value = s.host;
@@ -450,25 +462,33 @@ import Layout from '../layouts/Layout.astro';
                 const r = await fetch(`${API_BASE}/api/sessions`);
                 const data = await r.json();
                 const out = data.output || '';
+                const activeSsh = data.activeSsh || {};
                 const dot = document.getElementById('status-dot');
                 const txt = document.getElementById('status-text');
                 const progBox = document.getElementById('sync-progress-box');
                 
                 const isWatching = out.includes("Status: Watching for changes");
                 const isStaging = out.includes("Status: Staging") || out.includes("Status: Synchronizing") || out.includes("Status: Reconciling");
-                const isActive = out.includes("Name:");
+                const isActiveMutagen = out.includes("Name:");
+                
+                // Comprobar si hay alguna sesión SSH activa manual (sin mutagen)
+                const currentSessionName = document.getElementById('session_name').value;
+                const validCurrentName = currentSessionName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
+                const isSshActive = activeSsh[validCurrentName] !== undefined;
 
                 const nameMatch = out.match(/Name: "([^"]+)"/);
                 const prevActive = currentStatus.active;
-                currentStatus.active = isActive || isWatching || isStaging;
-                currentStatus.name = nameMatch ? nameMatch[1] : '';
+                currentStatus.active = isActiveMutagen || isWatching || isStaging || isSshActive;
+                currentStatus.name = nameMatch ? nameMatch[1] : (isSshActive ? currentSessionName : '');
 
                 if (currentStatus.active && !prevActive) {
                     showToast(`Tunnel "${currentStatus.name}" is now online`, 'success');
                 }
 
-                if (isWatching) {
-                    dot.className = 'status-dot active'; txt.innerText = 'Stable Connection'; progBox.style.display = 'none';
+                if (isWatching || (isSshActive && !isStaging)) {
+                    dot.className = 'status-dot active'; 
+                    txt.innerText = isSshActive && !isActiveMutagen ? 'Stable Connection (SSH-Only)' : 'Stable Connection'; 
+                    progBox.style.display = 'none';
                 } else if (isStaging) {
                     dot.className = 'status-dot syncing'; txt.innerText = 'Synchronizing...'; progBox.style.display = 'block';
                     const matchPercent = out.match(/(\d+)%/), matchEntries = out.match(/(\d+\/\d+ entries)/) || out.match(/(\d+ entries)/), statusMsg = out.match(/Status: ([^\n\(]+)/);
@@ -537,18 +557,22 @@ import Layout from '../layouts/Layout.astro';
         async function stopBridge() {
             const name = document.getElementById('session_name').value;
             if (!name) return;
-            if (!confirm(`Stop tunnel for "${name}"?`)) return;
+            if (!confirm(`Stop tunnel and deactivate bridge for "${name}"?`)) return;
             
             try {
+                // 1. Detener en el servidor (Mutagen + SSH record)
                 const r = await fetch(`${API_BASE}/api/stop-session`, { method: 'POST', body: JSON.stringify({ name }) });
-                const data = await r.json();
+                
+                // 2. Limpiar archivos locales (Desactivar bridge)
+                await fetch(`${API_BASE}/api/cleanup-local`, { method: 'POST', body: JSON.stringify({ local_path: selLocal }) });
+
                 if (r.ok) {
-                    showToast('Tunnel Stopped', 'success');
+                    showToast('Tunnel & Bridge Stopped', 'success');
                     currentStatus.active = false;
                     currentStatus.name = '';
                     updateStopButton();
                     renderSessionList();
-                } else showToast('Error: ' + data.message, 'error');
+                } else showToast('Error: ' + (await r.json()).message, 'error');
                 checkStatus();
             } catch(e) { showToast('Error: ' + e.message, 'error'); }
         }

@@ -1,7 +1,25 @@
 # Gemini Bridge - Shell Integration
 # Autor: Gemini CLI
 
+# Variable para control manual
+export GEMINI_BRIDGE_ENABLED="true"
+
+tunnel-off() {
+    export GEMINI_BRIDGE_ENABLED="false"
+    echo -e "⏸️  \x1b[33mGemini Bridge\x1b[0m: Intercepción desactivada. Comandos locales activos."
+}
+
+tunnel-on() {
+    export GEMINI_BRIDGE_ENABLED="true"
+    echo -e "🚀 \x1b[32mGemini Bridge\x1b[0m: Intercepción reactivada. Comandos irán al remoto."
+}
+
 _gemini_bridge_check_path() {
+    # Si el usuario ha desactivado el bridge manualmente, no interceptar
+    if [[ "$GEMINI_BRIDGE_ENABLED" == "false" ]]; then
+        return 1
+    fi
+
     # Si tenemos las variables de entorno de activate.sh, confiamos en ellas
     if [[ -n "$GEMINI_BRIDGE_HOST" && -n "$GEMINI_BRIDGE_PROJECT_ROOT" ]]; then
         if [[ "$(pwd)" == "$GEMINI_BRIDGE_PROJECT_ROOT"* ]]; then
@@ -28,7 +46,7 @@ _gemini_bridge_check_path() {
 if [ -n "$ZSH_VERSION" ]; then
     gemini-bridge-accept-line() {
         # Evitar recursividad si el comando ya contiene el wrapper
-        if [[ "$BUFFER" == *"remote-exec.sh"* ]]; then
+        if [[ "$BUFFER" == *"remote-exec.sh"* || "$BUFFER" == "tunnel-on" || "$BUFFER" == "tunnel-off" ]]; then
             zle .accept-line
             return
         fi
