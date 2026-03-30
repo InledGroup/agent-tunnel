@@ -40,11 +40,12 @@ if [ -n "$ZSH_VERSION" ]; then
         fi
 
         if _gemini_bridge_check_path; then
-            # Obtener la ruta del proyecto desde la variable de entorno o calculada
-            local BRIDGE_ROOT="${GEMINI_BRIDGE_PROJECT_ROOT:-$(pwd)}"
-            # Asegurarnos de que estamos en la carpeta del proyecto antes de interceptar
-            if [[ "$(pwd)" == "$BRIDGE_ROOT"* ]]; then
-                BUFFER="$BRIDGE_ROOT/gemini-bridge/scripts/remote-exec.sh $BUFFER"
+            # Usar la variable de entorno del ejecutor absoluto definida en activate.sh
+            local EXEC_PATH="${GEMINI_BRIDGE_REMOTE_EXEC}"
+            
+            # Si por algún motivo no está la variable, no podemos interceptar con seguridad
+            if [[ -n "$EXEC_PATH" && -f "$EXEC_PATH" ]]; then
+                BUFFER="$EXEC_PATH $BUFFER"
             fi
         fi
         zle .accept-line

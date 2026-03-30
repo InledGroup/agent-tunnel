@@ -51,8 +51,24 @@ curl -s -X POST -H "Content-Type: application/json" \
     http://localhost:3456/api/log > /dev/null
 
 # 6. Ejecución remota vía SSH
-# Usamos una sola conexión para asegurar el CD y el comando
-OUTPUT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no "$USER@$HOST" "mkdir -p \"$FINAL_REMOTE_PATH\" && cd \"$FINAL_REMOTE_PATH\" && $COMMAND" 2>&1)
+SSH_KEY="$HOME/.ssh/id_ed25519_bridge"
+# Opciones universales optimizadas
+SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+# Si la llave existe, la usamos
+if [ -f "$SSH_KEY" ]; then
+    SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
+fi
+
+# Si Mutagen está desactivado, NO intentamos crear directorios (para evitar problemas en ROMs/Routers)
+if [ "${GEMINI_BRIDGE_HAS_MUTAGEN}" == "true" ]; then
+    SSH_CMD="mkdir -p \"$FINAL_REMOTE_PATH\" && cd \"$FINAL_REMOTE_PATH\" && $COMMAND"
+else
+    # En modo SSH-only, intentamos CD pero no forzamos creación. Si falla el CD, ejecutamos en el CWD remoto por defecto.
+    SSH_CMD="cd \"$FINAL_REMOTE_PATH\" 2>/dev/null || cd ~; $COMMAND"
+fi
+
+OUTPUT=$(ssh $SSH_OPTS "$USER@$HOST" "$SSH_CMD" 2>&1)
 EXIT_CODE=$?
 
 # 7. Log del resultado

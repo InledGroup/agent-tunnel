@@ -3,6 +3,29 @@ import Layout from '../layouts/Layout.astro';
 ---
 
 <Layout title="Agent Tunnel | Pro">
+    <!-- Activation Modal -->
+    <div id="activation-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-card fade-in">
+            <div class="modal-header">
+                <div class="modal-title"><i class="fas fa-terminal"></i> Terminal Hook Activation</div>
+                <button class="ghost-btn" onclick="closeModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <p>Tunnel established! To intercept commands in your local terminal, run this in your project folder:</p>
+                <div class="copy-box">
+                    <code id="activation-cmd">source activate.sh</code>
+                    <button class="ghost-btn" onclick="copyToClipboard('source activate.sh')"><i class="far fa-copy"></i></button>
+                </div>
+                <p style="font-size:11px; color:var(--text-muted); margin-top:12px;">
+                    <i class="fas fa-info-circle"></i> Once activated, commands like <code>ls</code>, <code>mkdir</code>, or <code>node</code> will run on the remote target automatically.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="primary-btn" onclick="closeModal()">GOT IT!</button>
+            </div>
+        </div>
+    </div>
+
     <div id="loading-overlay">
         <div class="spinner"></div>
         <div id="loading-txt">CONNECTING...</div>
@@ -18,7 +41,7 @@ import Layout from '../layouts/Layout.astro';
             <span>AGENT TUNNEL</span>
         </div>
 
-        <section class="sessions-section" style="flex: 1; display: flex; flex-direction: column;">
+        <section class="sessions-section" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
             <div class="section-label"><i class="fas fa-history"></i> Recent Sessions</div>
             <div id="session-list" class="session-list"></div>
             <button id="new-session-btn" class="secondary-btn animate-hover" style="width:100%; margin-top:16px;">
@@ -61,7 +84,17 @@ import Layout from '../layouts/Layout.astro';
                             <div class="input-group"><i class="fas fa-shield-alt"></i><input type="password" id="pass" class="input-with-icon auto-connect" placeholder="••••••••"></div>
                         </div>
                     </div>
-                    <button id="btn-test" class="secondary-btn animate-hover" style="margin-top: 10px;">
+                    <div class="setting-item-inline">
+                        <div class="setting-info">
+                            <i class="fas fa-sync-alt"></i>
+                            <span>File System Sync (Mutagen)</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-mutagen" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <button id="btn-test" class="secondary-btn animate-hover" style="margin-top: 4px;">
                         <i class="fas fa-flask"></i> Verify SSH Access
                     </button>
                 </div>
@@ -132,6 +165,9 @@ import Layout from '../layouts/Layout.astro';
     </main>
 
     <script>
+        // API Base URL Detection: Direct connection to avoid proxy issues in dev mode
+        const API_BASE = window.location.port === '4321' ? 'http://localhost:3456' : '';
+        
         let sessions = {}, selLocal = '', selRemote = '', explorersData = { 'local-list': null, 'remote-list': null };
         let currentStatus = { active: false, name: '' };
         let autoConnectTimer = null;
@@ -173,6 +209,22 @@ import Layout from '../layouts/Layout.astro';
             document.getElementById('toggle-intercept').onchange = updateSettings;
             document.getElementById('instruction_filename').onchange = updateSettings;
 
+            document.getElementById('toggle-mutagen').onchange = (e) => {
+                const remoteCont = document.getElementById('remote-container');
+                const remoteSel = document.getElementById('remote-sel');
+                if (!e.target.checked) {
+                    remoteCont.classList.add('disabled-explorer');
+                    remoteSel.style.opacity = '0.5';
+                    selRemote = 'N/A (SSH-Only)';
+                    remoteSel.innerText = selRemote;
+                } else {
+                    remoteCont.classList.remove('disabled-explorer');
+                    remoteSel.style.opacity = '1';
+                    selRemote = '';
+                    remoteSel.innerText = 'Not mapped';
+                    autoBrowseRemote();
+                }
+            };
             document.querySelectorAll('.auto-connect').forEach(input => {
                 input.addEventListener('input', () => {
                     clearTimeout(autoConnectTimer);
@@ -193,7 +245,7 @@ import Layout from '../layouts/Layout.astro';
         }
 
         async function loadSettings() {
-            const r = await fetch('/api/settings');
+            const r = await fetch(`${API_BASE}/api/settings`);
             const settings = await r.json();
             document.getElementById('toggle-intercept').checked = settings.intercept_terminal;
             document.getElementById('instruction_filename').value = settings.instruction_filename || 'GEMINI.md';
@@ -202,12 +254,12 @@ import Layout from '../layouts/Layout.astro';
         async function updateSettings() {
             const intercept_terminal = document.getElementById('toggle-intercept').checked;
             const instruction_filename = document.getElementById('instruction_filename').value || 'GEMINI.md';
-            await fetch('/api/settings', { method: 'POST', body: JSON.stringify({ intercept_terminal, instruction_filename }) });
+            await fetch(`${API_BASE}/api/settings`, { method: 'POST', body: JSON.stringify({ intercept_terminal, instruction_filename }) });
             showToast('Settings saved', 'info');
         }
 
         function setupSSE() {
-            const ev = new EventSource('/api/log-stream');
+            const ev = new EventSource(`${API_BASE}/api/log-stream`);
             ev.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 if (data.type === 'system' || data.type === 'error') {
@@ -228,7 +280,7 @@ import Layout from '../layouts/Layout.astro';
         }
 
         async function loadConfigs() {
-            const r = await fetch('/api/get-configs');
+            const r = await fetch(`${API_BASE}/api/get-configs`);
             sessions = await r.json();
             renderSessionList();
         }
@@ -272,12 +324,27 @@ import Layout from '../layouts/Layout.astro';
             document.getElementById('host').value = s.host;
             document.getElementById('user').value = s.user;
             document.getElementById('pass').value = s.password || '';
-            selLocal = s.local_path; selRemote = s.remote_path;
+            document.getElementById('toggle-mutagen').checked = s.use_mutagen !== false;
+            
+            // Handle visual state of remote explorer based on mutagen toggle
+            const remoteCont = document.getElementById('remote-container');
+            const remoteSelEl = document.getElementById('remote-sel');
+            if (s.use_mutagen === false) {
+                remoteCont.classList.add('disabled-explorer');
+                remoteSelEl.style.opacity = '0.5';
+                selRemote = 'N/A (SSH-Only)';
+            } else {
+                remoteCont.classList.remove('disabled-explorer');
+                remoteSelEl.style.opacity = '1';
+                selRemote = s.remote_path;
+            }
+            
+            selLocal = s.local_path;
             document.getElementById('local-sel').innerText = selLocal;
             document.getElementById('remote-sel').innerText = selRemote;
             
             browseLocal(selLocal); 
-            browseRemote(selRemote);
+            if (s.use_mutagen !== false) browseRemote(selRemote);
             
             document.querySelectorAll('.session-card').forEach(c => c.classList.remove('active-ui'));
             if (element) element.classList.add('active-ui');
@@ -289,7 +356,7 @@ import Layout from '../layouts/Layout.astro';
         async function browseLocal(path) {
             document.getElementById('local-spinner').style.display = 'block';
             try {
-                const r = await fetch('/api/ls-local', { method: 'POST', body: JSON.stringify({ path }) });
+                const r = await fetch(`${API_BASE}/api/ls-local`, { method: 'POST', body: JSON.stringify({ path }) });
                 const data = await r.json();
                 explorersData['local-list'] = data;
                 document.getElementById('local-nav').innerText = data.current;
@@ -307,15 +374,15 @@ import Layout from '../layouts/Layout.astro';
 
         async function autoBrowseRemote() {
             const host = document.getElementById('host').value, user = document.getElementById('user').value;
-            if (host && user) browseRemote('/');
+            if (host && user && document.getElementById('toggle-mutagen').checked) browseRemote('/');
         }
 
         async function browseRemote(path = '/') {
             const host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
-            if (!host || !user) return;
+            if (!host || !user || !document.getElementById('toggle-mutagen').checked) return;
             document.getElementById('remote-spinner').style.display = 'block';
             try {
-                const r = await fetch('/api/ls-remote', { method: 'POST', body: JSON.stringify({ host, user, password: pass, remote_path: path }) });
+                const r = await fetch(`${API_BASE}/api/ls-remote`, { method: 'POST', body: JSON.stringify({ host, user, password: pass, remote_path: path }) });
                 const data = await r.json();
                 if (data.error) {
                     showToast(`Remote Error: ${data.error}`, 'error');
@@ -347,10 +414,19 @@ import Layout from '../layouts/Layout.astro';
 
         function renderExp(id, data, onNav, onSel) {
             const el = document.getElementById(id); el.innerHTML = '';
-            
+            if (!data || !data.current) return;
+
             const up = document.createElement('div'); up.className = 'explorer-item'; 
             up.innerHTML = '<i class="fas fa-chevron-up"></i> .. [Go Up]';
-            up.onclick = () => { let p = data.current.split('/').filter(x=>x); p.pop(); onNav('/'+p.join('/')); };
+            up.onclick = () => { 
+                let pathStr = data.current;
+                // Eliminar barra final si existe
+                if (pathStr.endsWith('/') && pathStr.length > 1) pathStr = pathStr.slice(0, -1);
+                const parts = pathStr.split('/').filter(x => x);
+                parts.pop();
+                const parentPath = '/' + parts.join('/');
+                onNav(parentPath); 
+            };
             el.appendChild(up);
             
             const selCurrent = document.createElement('div'); selCurrent.className = 'explorer-item selected';
@@ -358,17 +434,20 @@ import Layout from '../layouts/Layout.astro';
             selCurrent.onclick = () => { onSel(data.current); };
             el.appendChild(selCurrent);
             
-            data.dirs.forEach(d => {
-                const item = document.createElement('div'); item.className = 'explorer-item folder'; 
-                item.innerHTML = '<i class="fas fa-folder"></i> ' + d;
-                item.onclick = () => onNav(data.current + (data.current.endsWith('/') ? '' : '/') + d);
-                el.appendChild(item);
-            });
+            if (data.dirs) {
+                data.dirs.forEach(d => {
+                    const item = document.createElement('div'); item.className = 'explorer-item folder'; 
+                    item.innerHTML = '<i class="fas fa-folder"></i> ' + d;
+                    const nextPath = data.current + (data.current.endsWith('/') ? '' : '/') + d;
+                    item.onclick = () => onNav(nextPath);
+                    el.appendChild(item);
+                });
+            }
         }
 
         async function checkStatus() {
             try {
-                const r = await fetch('/api/sessions');
+                const r = await fetch(`${API_BASE}/api/sessions`);
                 const data = await r.json();
                 const out = data.output || '';
                 const dot = document.getElementById('status-dot');
@@ -420,21 +499,31 @@ import Layout from '../layouts/Layout.astro';
             }
         }
 
+        window.closeModal = () => document.getElementById('activation-modal').style.display = 'none';
+        window.openModal = () => document.getElementById('activation-modal').style.display = 'flex';
+        window.copyToClipboard = (text) => {
+            navigator.clipboard.writeText(text);
+            showToast('Copied to clipboard!', 'info');
+        };
+
         async function activateBridge() {
-            const name = document.getElementById('session_name').value, host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
-            if (!name || !host || !user || !selLocal || !selRemote) { 
-                showToast('Please fill all fields and select both paths', 'error');
+            const name = document.getElementById('session_name').value, host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value, useMutagen = document.getElementById('toggle-mutagen').checked;
+            if (!name || !host || !user || !selLocal || (useMutagen && !selRemote)) { 
+                showToast('Please fill all fields and select paths', 'error');
                 return; 
             }
+            const configRemotePath = useMutagen ? selRemote : '/tmp/ssh-only';
+            
             document.getElementById('loading-overlay').style.display = 'flex';
             try {
-                const r = await fetch('/api/config', { method: 'POST', body: JSON.stringify({ session_name: name, host, user, password: pass, local_path: selLocal, remote_path: selRemote }) });
+                const r = await fetch(`${API_BASE}/api/config`, { method: 'POST', body: JSON.stringify({ session_name: name, host, user, password: pass, local_path: selLocal, remote_path: configRemotePath, use_mutagen: useMutagen }) });
                 document.getElementById('loading-overlay').style.display = 'none';
                 const data = await r.json();
                 if (data.status === 'warning') { 
                     showToast(data.message, 'info'); 
                 } else if (r.ok) { 
                     showToast('Establishing Tunnel...', 'success'); 
+                    setTimeout(openModal, 1500); // Abrir modal de instrucciones
                 } else { 
                     showToast('Tunnel Failure: ' + data.message, 'error'); 
                 }
@@ -451,7 +540,7 @@ import Layout from '../layouts/Layout.astro';
             if (!confirm(`Stop tunnel for "${name}"?`)) return;
             
             try {
-                const r = await fetch('/api/stop-session', { method: 'POST', body: JSON.stringify({ name }) });
+                const r = await fetch(`${API_BASE}/api/stop-session`, { method: 'POST', body: JSON.stringify({ name }) });
                 const data = await r.json();
                 if (r.ok) {
                     showToast('Tunnel Stopped', 'success');
@@ -472,11 +561,11 @@ import Layout from '../layouts/Layout.astro';
             }
             const btn = document.getElementById('btn-test'); btn.disabled = true; btn.innerText = 'Checking...';
             try {
-                const r = await fetch('/api/test-ssh', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host, user, password: pass}) });
+                const r = await fetch(`${API_BASE}/api/test-ssh`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host, user, password: pass}) });
                 const data = await r.json();
                 if (data.status === 'success') {
                     showToast('SSH Access Confirmed!', 'success');
-                    browseRemote('/');
+                    if (document.getElementById('toggle-mutagen').checked) browseRemote('/');
                 } else {
                     showToast('Access Denied: ' + data.message, 'error');
                 }
@@ -486,7 +575,7 @@ import Layout from '../layouts/Layout.astro';
 
         async function deleteSession(name) { 
             if (!confirm(`Delete ${name}?`)) return; 
-            await fetch('/api/delete-session', { method: 'POST', body: JSON.stringify({ name }) }); 
+            await fetch(`${API_BASE}/api/delete-session`, { method: 'POST', body: JSON.stringify({ name }) }); 
             showToast(`Deleted ${name}`, 'info');
             loadConfigs(); 
         }
@@ -494,6 +583,13 @@ import Layout from '../layouts/Layout.astro';
         function newSession() { 
             selectedSessionName = '';
             document.querySelectorAll('input:not([type=checkbox])').forEach(i => i.value=''); 
+            document.getElementById('toggle-mutagen').checked = true;
+            
+            const remoteCont = document.getElementById('remote-container');
+            const remoteSelEl = document.getElementById('remote-sel');
+            remoteCont.classList.remove('disabled-explorer');
+            remoteSelEl.style.opacity = '1';
+            
             selLocal=''; selRemote=''; 
             document.getElementById('local-sel').innerText='Not mapped'; 
             document.getElementById('remote-sel').innerText='Not mapped'; 
@@ -506,7 +602,20 @@ import Layout from '../layouts/Layout.astro';
     </script>
 </Layout>
 
-<style>
+<style is:global>
+    /* Modal Styles */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 3000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(8px); }
+    .modal-card { width: 450px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 30px 60px rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; }
+    .modal-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .modal-title { font-weight: 700; font-size: 16px; color: var(--accent); display: flex; align-items: center; gap: 12px; }
+    .modal-body { padding: 24px; }
+    .modal-body p { margin: 0 0 16px; font-size: 14px; line-height: 1.5; color: var(--text); }
+    .modal-footer { padding: 16px 24px; background: rgba(0,0,0,0.2); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+    
+    .copy-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; }
+    .copy-box code { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--accent); font-weight: 500; }
+    .copy-box button:hover { background: var(--surface-hover); color: var(--accent); }
+
     aside { 
         width: var(--sidebar-width); 
         background: var(--surface); 
@@ -539,6 +648,7 @@ import Layout from '../layouts/Layout.astro';
         gap: 8px;
     }
 
+    /* Sidebar Sessions */
     .session-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; }
     
     .session-card { 
@@ -547,7 +657,7 @@ import Layout from '../layouts/Layout.astro';
         border-radius: var(--radius); 
         padding: 12px; 
         cursor: pointer; 
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); 
+        transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1); 
         position: relative;
         display: flex;
         justify-content: space-between;
@@ -558,17 +668,11 @@ import Layout from '../layouts/Layout.astro';
     .session-card:hover { 
         border-color: var(--accent); 
         background: var(--surface-hover);
-        transform: translateX(4px);
-    }
-    
-    .session-card:active {
-        transform: scale(0.98) translateX(4px);
     }
     
     .session-card.active-ui { 
         border-color: var(--accent); 
         background: var(--accent-muted); 
-        box-shadow: 0 0 15px rgba(255, 130, 5, 0.1);
     }
     
     .session-info { display: flex; align-items: center; gap: 10px; }
@@ -581,12 +685,12 @@ import Layout from '../layouts/Layout.astro';
     .btn-del { 
         background: none; border: none; color: var(--text-muted); 
         cursor: pointer; padding: 6px; font-size: 12px; transition: 0.2s;
-        opacity: 0;
         border-radius: 4px;
+        display: flex; align-items: center; justify-content: center;
     }
-    .session-card:hover .btn-del { opacity: 1; }
     .btn-del:hover { color: var(--red); background: rgba(239, 68, 68, 0.1); }
 
+    /* Layout Main */
     main { 
         flex: 1; 
         overflow-y: auto; 
@@ -607,7 +711,6 @@ import Layout from '../layouts/Layout.astro';
         display: flex;
         flex-direction: column;
         gap: 20px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
     }
 
     .field { display: flex; flex-direction: column; gap: 8px; }
@@ -622,17 +725,16 @@ import Layout from '../layouts/Layout.astro';
         font-size: 13px; 
         width: 100%; 
         transition: 0.2s;
-        font-family: 'Inter', sans-serif;
     }
     .input-with-icon { padding-left: 36px; }
     .input-group { position: relative; }
     .input-group i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 14px; }
-    input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-muted); }
+    input:focus { border-color: var(--accent); }
 
     .grid-sub2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
     button { 
-        padding: 12px 16px; 
+        padding: 10px 16px; 
         border-radius: var(--radius); 
         font-size: 13px; 
         font-weight: 600; 
@@ -642,28 +744,55 @@ import Layout from '../layouts/Layout.astro';
         align-items: center; 
         justify-content: center; 
         gap: 8px; 
-        user-select: none;
     }
 
     .primary-btn { background: var(--accent); color: white; border: none; }
-    .primary-btn:hover { background: #e67504; box-shadow: 0 4px 15px rgba(255, 130, 5, 0.3); }
+    .primary-btn:hover { background: #e67504; }
     
     .secondary-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
-    .secondary-btn:hover { background: var(--surface-hover); border-color: var(--text-muted); }
+    .secondary-btn:hover { background: var(--surface-hover); }
     
     .danger-btn { background: #3d1414; color: #fca5a5; border-color: #5d1d1d; }
-    .danger-btn:disabled { opacity: 0.3; cursor: not-allowed; }
     .danger-btn.active-danger { background: var(--red); color: white; border: none; }
-    .danger-btn.active-danger:hover { background: #dc2626; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3); }
+    .danger-btn.active-danger:hover { background: #dc2626; }
 
-    .ghost-btn { background: transparent; border: none; color: var(--text-muted); padding: 4px 8px; font-size: 14px; }
-    .ghost-btn:hover { color: var(--text); background: var(--surface-hover); }
+    .ghost-btn { 
+        background: transparent; 
+        border: none; 
+        color: var(--text-muted); 
+        padding: 6px; 
+        font-size: 14px; 
+        border-radius: 4px;
+        transition: 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+    }
+    .ghost-btn:hover { 
+        color: var(--text); 
+        background: var(--surface-hover); 
+    }
+
+    /* Switch Component */
+    .setting-item-inline { 
+        display: flex; 
+        align-items: center; 
+        justify-content: space-between; 
+        background: var(--bg); 
+        padding: 12px 16px; 
+        border-radius: var(--radius); 
+        border: 1px solid var(--border);
+    }
+    .setting-info { display: flex; align-items: center; gap: 12px; }
+    .setting-info i { color: var(--accent); font-size: 14px; }
+    .setting-info span { font-size: 13px; font-weight: 500; }
 
     .settings-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
     .setting-item { display: flex; align-items: center; justify-content: space-between; }
     .setting-name { font-size: 13px; font-weight: 500; }
 
-    /* Explorer */
+    /* Explorer Component */
     .explorer-container { 
         background: var(--bg); 
         border: 1px solid var(--border); 
@@ -671,10 +800,12 @@ import Layout from '../layouts/Layout.astro';
         overflow: hidden; 
         display: flex;
         flex-direction: column;
-        transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        height: 200px;
+        height: 180px;
+        transition: 0.3s;
     }
-    .explorer-container.expanded { height: 450px; }
+    .explorer-container.expanded { height: 400px; }
+    .explorer-container.disabled-explorer { opacity: 0.3; pointer-events: none; filter: grayscale(0.8); }
+    
     .explorer-header { padding: 8px 12px; background: var(--surface-hover); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
     .explorer-path { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .explorer-search { padding: 8px; border-bottom: 1px solid var(--border); }
@@ -684,47 +815,23 @@ import Layout from '../layouts/Layout.astro';
     
     .explorer-item { 
         padding: 8px 12px; 
-        font-size: 12px; 
-        border-radius: 4px; 
+        font-size: 13px; 
+        border-radius: 6px; 
         cursor: pointer; 
         display: flex; 
         align-items: center; 
         gap: 10px; 
-        transition: 0.15s;
-        user-select: none;
+        transition: 0.2s;
+        color: var(--text-muted);
     }
-    
-    .explorer-item:hover { 
-        background: var(--surface-hover); 
-        color: var(--accent); 
-        padding-left: 16px;
-    }
-    
-    .explorer-item:active {
-        background: var(--accent-muted);
-        transform: scale(0.99);
-    }
-    
-    .explorer-item i { color: var(--text-muted); font-size: 14px; transition: 0.15s; }
-    .explorer-item:hover i { color: var(--accent); }
+    .explorer-item:hover { background: var(--surface-hover); color: var(--text); }
     .explorer-item.folder i { color: var(--accent); }
-    
-    .explorer-item.selected { 
-        background: var(--accent-muted); 
-        color: var(--accent); 
-        font-weight: 600; 
-        border: 1px dashed var(--accent);
-    }
+    .explorer-item.selected { background: var(--accent-muted); color: var(--accent); font-weight: 600; border: 1px solid var(--accent); }
 
     .selection-path { font-size:10px; margin-top:6px; color: var(--accent); font-family: 'JetBrains Mono', monospace; }
 
-    .spinner.small { width: 14px; height: 14px; border-width: 2px; }
-
-    .action-bar { display: flex; gap: 16px; margin-top: 8px; }
-    .action-bar button { flex: 1; height: 54px; font-size: 15px; letter-spacing: 0.5px; }
-
-    /* Terminal */
-    .terminal { background: #0c0c0c; border: 1px solid var(--border); border-radius: var(--radius); font-family: 'JetBrains Mono', monospace; font-size: 12px; height: 300px; display: flex; flex-direction: column; }
+    /* Global Terminal */
+    .terminal { background: #0c0c0c; border: 1px solid var(--border); border-radius: var(--radius); font-family: 'JetBrains Mono', monospace; font-size: 12px; height: 250px; display: flex; flex-direction: column; }
     .term-header { padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
     .term-body { padding: 16px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 4px; }
     .log-line { display: flex; gap: 12px; padding: 2px 0; border-bottom: 1px solid #151515; }
@@ -735,56 +842,22 @@ import Layout from '../layouts/Layout.astro';
     .log-type.sys { background: rgba(59, 130, 246, 0.1); color: var(--blue); }
     .log-content { white-space: pre-wrap; word-break: break-all; color: #bbb; flex: 1; line-height: 1.4; }
 
-    /* Progress */
-    .sync-progress-container { margin-top: 20px; }
-    .progress-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-bottom: 6px; font-weight: 700; text-transform: uppercase; }
-    .progress-bg { background: var(--border); height: 6px; border-radius: 10px; overflow: hidden; }
-    .progress-fill { background: var(--accent); height: 100%; width: 0%; transition: width 0.5s ease; box-shadow: 0 0 10px var(--accent); }
-    #sync-details { font-size: 9px; color: var(--text-muted); margin-top: 6px; font-family: 'JetBrains Mono'; }
+    /* Misc */
+    .action-bar { display: flex; gap: 16px; margin-top: 8px; }
+    .action-bar button { flex: 1; height: 50px; font-size: 14px; }
 
-    /* Loading Overlay */
     #loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 1000; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 20px; backdrop-filter: blur(4px); }
-    #loading-txt { font-size: 14px; font-weight: 600; color: var(--accent); letter-spacing: 1px; }
-
-    /* Toast Notifications */
+    
     #toast-container { position: fixed; top: 24px; right: 24px; display: flex; flex-direction: column; gap: 12px; z-index: 2000; }
-    .toast { 
-        min-width: 280px; 
-        padding: 16px 20px; 
-        background: var(--surface); 
-        border-left: 4px solid var(--accent); 
-        border-radius: var(--radius); 
-        color: var(--text); 
-        box-shadow: 0 10px 25px rgba(0,0,0,0.4); 
-        display: flex; 
-        align-items: center; 
-        gap: 12px; 
-        font-size: 14px;
-        font-weight: 500;
-        animation: toastIn 0.3s ease-out forwards;
-        transition: 0.3s;
-    }
-    .toast-success { border-left-color: var(--green); }
-    .toast-error { border-left-color: var(--red); }
-    .toast-info { border-left-color: var(--blue); }
-    .toast i { font-size: 16px; }
-    .toast-success i { color: var(--green); }
-    .toast-error i { color: var(--red); }
-    .toast-info i { color: var(--blue); }
+    .toast { min-width: 250px; padding: 12px 20px; background: var(--surface); border-left: 4px solid var(--accent); border-radius: var(--radius); color: var(--text); box-shadow: 0 10px 25px rgba(0,0,0,0.4); display: flex; align-items: center; gap: 12px; font-size: 13px; animation: toastIn 0.3s ease-out forwards; }
+    @keyframes toastIn { from { opacity: 0; transform: translateX(50px); } to { opacity: 1; transform: translateX(0); } }
 
-    @keyframes toastIn {
-        from { opacity: 0; transform: translateX(50px); }
-        to { opacity: 1; transform: translateX(0); }
-    }
-
-    /* Status Dot */
     .status-badge { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 8px; }
     .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
     .status-dot.active { background: var(--green); box-shadow: 0 0 12px var(--green); }
     .status-dot.syncing { background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: pulse 1.5s infinite; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
 
-    /* Switch */
     .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .3s; border-radius: 34px; }
