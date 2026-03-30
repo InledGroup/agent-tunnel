@@ -1,91 +1,157 @@
 #!/bin/bash
 # remote-exec.sh
-# Improved version: Uses environment variables from activate.sh when available.
+# Executes commands on remote target via SSH, but only if the bridge session is active.
 
-# 1. Obtener configuración (Priorizar entorno, fallback a búsqueda manual)
-HOST="${GEMINI_BRIDGE_HOST}"
-USER="${GEMINI_BRIDGE_USER}"
-LOCAL_ROOT="${GEMINI_BRIDGE_PROJECT_ROOT}"
-
-if [[ -z "$HOST" || -z "$LOCAL_ROOT" ]]; then
-    # Fallback: Buscar en configs si no hay variables de entorno
-    CONFIGS_DIR="$HOME/.gemini-bridge/configs"
-    CURRENT_DIR=$(pwd)
-    for f in "$CONFIGS_DIR"/*.json; do
-        [ -e "$f" ] || continue
-        LP=$(grep '"local_path":' "$f" | sed -E 's/.*"local_path": "(.*)".*/\1/')
-        if [[ "$CURRENT_DIR" == "$LP"* ]]; then
-            HOST=$(grep '"host":' "$f" | sed -E 's/.*"host": "(.*)".*/\1/')
-            USER=$(grep '"user":' "$f" | sed -E 's/.*"user": "(.*)".*/\1/')
-            REMOTE_ROOT=$(grep '"remote_path":' "$f" | sed -E 's/.*"remote_path": "(.*)".*/\1/')
-            LOCAL_ROOT="$LP"
+# 1. Utility functions
+_gemini_parse_json() {
+    python3 -c "
+import sys, json
+try:
+    content = sys.argv[1]
+    key = sys.argv[2]
+    if content.startswith('{') or content.startswith('['):
+        data = json.loads(content)
+    else:
+        with open(content, 'r') as f:
+            data = json.load(f)
+    
+    val = data
+    for part in key.split('.'):
+        if isinstance(val, dict):
+            val = val.get(part, '')
+        else:
+            val = ''
             break
+    if isinstance(val, (dict, list)):
+        print(json.dumps(val))
+    else:
+        print(val)
+except Exception:
+    pass
+" "$1" "$2"
+}
+
+_gemini_normalize_path() {
+    local p="$1"
+    p=$(echo "$p" | tr -s '/')
+    [[ "$p" != "/" ]] && p="${p%/}"
+    echo "$p"
+}
+
+# --- DETECCIÓN DE CONFIGURACIÓN ---
+CURRENT_DIR=$(_gemini_normalize_path "$(pwd)")
+CONFIGS_DIR="$HOME/.gemini-bridge/configs"
+
+# Prioridad 1: Buscar si el directorio actual coincide con alguna config guardada
+# Esto evita usar una sesión antigua de variables de entorno (como router2 si ahora estás en skyrouter)
+MATCHED_CONFIG=""
+for f in "$CONFIGS_DIR"/*.json; do
+    [ -e "$f" ] || continue
+    LP=$(_gemini_parse_json "$f" local_path)
+    LP=$(_gemini_normalize_path "$LP")
+    if [[ -n "$LP" && "$CURRENT_DIR" == "$LP"* ]]; then
+        MATCHED_CONFIG="$f"
+        break
+    fi
+done
+
+if [[ -n "$MATCHED_CONFIG" ]]; then
+    HOST=$(_gemini_parse_json "$MATCHED_CONFIG" host)
+    USER=$(_gemini_parse_json "$MATCHED_CONFIG" user)
+    REMOTE_ROOT=$(_gemini_parse_json "$MATCHED_CONFIG" remote_path)
+    SESSION_NAME=$(basename "$MATCHED_CONFIG" .json)
+    LOCAL_ROOT=$(_gemini_parse_json "$MATCHED_CONFIG" local_path)
+else
+    # Fallback a variables de entorno si no hay match por directorio
+    HOST="${GEMINI_BRIDGE_HOST}"
+    USER="${GEMINI_BRIDGE_USER}"
+    LOCAL_ROOT="${GEMINI_BRIDGE_PROJECT_ROOT}"
+    REMOTE_ROOT="${GEMINI_BRIDGE_REMOTE_ROOT}"
+    SESSION_NAME="${GEMINI_BRIDGE_SESSION}"
+fi
+
+# 2. VERIFICACIÓN DE SESIÓN ACTIVA
+IS_ACTIVE="false"
+STATUS_MSG=""
+
+if [[ -n "$SESSION_NAME" ]]; then
+    VALID_SESSION=$(echo "$SESSION_NAME" | sed 's/ /-/g' | sed 's/[^a-zA-Z0-9_-]//g')
+    
+    SESSIONS_JSON=$(curl -s --max-time 2 http://127.0.0.1:3456/api/sessions 2>/dev/null)
+    CURL_EXIT=$?
+
+    if [[ $CURL_EXIT -eq 0 && -n "$SESSIONS_JSON" ]]; then
+        ACTIVE_VAL=$(_gemini_parse_json "$SESSIONS_JSON" "activeSsh.$VALID_SESSION")
+        if [[ -n "$ACTIVE_VAL" && "$ACTIVE_VAL" != "null" ]]; then
+            IS_ACTIVE="true"
+        else
+            STATUS_MSG="Tunnel '$SESSION_NAME' is explicitly disabled in Bridge server."
         fi
-    done
+    else
+        if [[ -f "$CONFIGS_DIR/${SESSION_NAME}.json" ]]; then
+            IS_ACTIVE="true"
+            [[ $CURL_EXIT -ne 0 ]] && STATUS_MSG="Bridge server not responding. Running '$SESSION_NAME' in Standalone Mode."
+        fi
+    fi
 fi
 
-# Intentar obtener REMOTE_ROOT si no lo tenemos (fallback a /)
-if [ -z "$REMOTE_ROOT" ]; then
-    REMOTE_ROOT="/"
-fi
-
-# 2. Safety check: If vital info is missing, execute locally
-if [[ -z "$HOST" || -z "$USER" ]]; then
+if [[ "$IS_ACTIVE" == "false" ]]; then
+    [[ -n "$STATUS_MSG" ]] && echo -e "⚠️  \\x1b[33m[Agent Tunnel]\\x1b[0m $STATUS_MSG"
+    echo -e "⚙️  Executing locally..."
     eval "$@"
     exit $?
 fi
 
-# 3. Mapeo de rutas
-CURRENT_DIR=$(pwd)
-RELATIVE_PATH="${CURRENT_DIR#$LOCAL_ROOT}"
-# Asegurar que no hay barras dobles al principio
-FINAL_REMOTE_PATH="${REMOTE_ROOT}${RELATIVE_PATH}"
-FINAL_REMOTE_PATH=$(echo "$FINAL_REMOTE_PATH" | sed 's#//#/#g')
+[[ -n "$STATUS_MSG" ]] && echo -e "📡 \\x1b[36m[Agent Tunnel]\\x1b[0m $STATUS_MSG"
 
-# 4. Comando final
+# 3. Preparar comando remoto
+LOCAL_ROOT=$(_gemini_normalize_path "${LOCAL_ROOT:-$CURRENT_DIR}")
+REMOTE_ROOT=$(_gemini_normalize_path "${REMOTE_ROOT:-/}")
+RELATIVE_PATH="${CURRENT_DIR#$LOCAL_ROOT}"
+[[ "$RELATIVE_PATH" != /* && -n "$RELATIVE_PATH" ]] && RELATIVE_PATH="/$RELATIVE_PATH"
+FINAL_REMOTE_PATH=$(_gemini_normalize_path "${REMOTE_ROOT}${RELATIVE_PATH}")
 COMMAND="$*"
 
-# 5. Log al servidor local del bridge
-curl -s -X POST -H "Content-Type: application/json" \
-    -d "{\"type\":\"command\",\"cmd\":\"$COMMAND\",\"path\":\"$FINAL_REMOTE_PATH\"}" \
-    http://localhost:3456/api/log > /dev/null
+# 4. Log al servidor de forma segura
+LOG_PAYLOAD=$(python3 -c "
+import sys, json
+data = {'type': 'command', 'cmd': sys.argv[1], 'path': sys.argv[2]}
+print(json.dumps(data))
+" "$COMMAND" "$FINAL_REMOTE_PATH")
+curl -s -X POST -H "Content-Type: application/json" -d "$LOG_PAYLOAD" http://127.0.0.1:3456/api/log > /dev/null
 
-# 6. Ejecución remota vía SSH
+# 5. Ejecución remota vía SSH
 SSH_KEY="$HOME/.ssh/id_ed25519_bridge"
-# Opciones universales optimizadas
 SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+[ -f "$SSH_KEY" ] && SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
 
-# Si la llave existe, la usamos
-if [ -f "$SSH_KEY" ]; then
-    SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
-fi
-
-# Si Mutagen está desactivado, NO intentamos crear directorios (para evitar problemas en ROMs/Routers)
-if [ "${GEMINI_BRIDGE_HAS_MUTAGEN}" == "true" ]; then
+if [[ "$GEMINI_BRIDGE_HAS_MUTAGEN" == "true" ]]; then
     SSH_CMD="mkdir -p \"$FINAL_REMOTE_PATH\" && cd \"$FINAL_REMOTE_PATH\" && $COMMAND"
 else
-    # En modo SSH-only, intentamos CD pero no forzamos creación. Si falla el CD, ejecutamos en el CWD remoto por defecto.
     SSH_CMD="cd \"$FINAL_REMOTE_PATH\" 2>/dev/null || cd ~; $COMMAND"
 fi
 
 OUTPUT=$(ssh $SSH_OPTS "$USER@$HOST" "$SSH_CMD" 2>&1)
 EXIT_CODE=$?
 
-# 7. Log del resultado
-node -e "
-const http = require('http');
-const data = JSON.stringify({
-    type: 'result',
-    cmd: process.argv[1],
-    exit_code: parseInt(process.argv[2]),
-    output: process.argv[3]
-});
-const req = http.request({
-    hostname: 'localhost', port: 3456, path: '/api/log', method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
-});
-req.on('error', () => {}); req.write(data); req.end();
-" "$COMMAND" "$EXIT_CODE" "$OUTPUT"
+if [[ $EXIT_CODE -eq 255 ]]; then
+    echo -e "❌ \\x1b[31m[Agent Tunnel] SSH Connection Error:\\x1b[0m\n$OUTPUT"
+    echo -e "\\x1b[33mFalling back to local execution...\\x1b[0m"
+    eval "$@"
+    exit $?
+fi
+
+# 6. Log del resultado de forma segura
+RESULT_PAYLOAD=$(python3 -c "
+import sys, json
+try:
+    exit_code = int(sys.argv[2])
+except:
+    exit_code = 1
+data = {'type': 'result', 'cmd': sys.argv[1], 'exit_code': exit_code, 'output': sys.argv[3]}
+print(json.dumps(data))
+" "$COMMAND" "$EXIT_CODE" "$OUTPUT")
+curl -s -X POST -H "Content-Type: application/json" -d "$RESULT_PAYLOAD" http://127.0.0.1:3456/api/log > /dev/null
 
 echo "$OUTPUT"
 exit $EXIT_CODE

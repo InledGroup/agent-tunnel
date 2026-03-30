@@ -4,7 +4,11 @@
 
 echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Starting Development Mode..."
 
+echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Cleaning up ports 3456 & 4321..."
+lsof -ti :3456,4321 | xargs kill -9 2>/dev/null || true
+
 # 1. Levantar el Backend (API) en el puerto 3456
+echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Starting Backend (Node.js)..."
 node gemini-bridge/server.js &
 BACKEND_PID=$!
 
@@ -16,6 +20,7 @@ if [ ! -d "node_modules" ]; then
 fi
 
 # 3. Levantar Astro en el puerto 4321
+echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Starting Frontend (Astro)..."
 npm run dev -- --port 4321 &
 FRONTEND_PID=$!
 
@@ -28,6 +33,6 @@ echo -e "🔌 \x1b[1mBACKEND:\x1b[0m  http://localhost:3456 (API & Logs)"
 echo -e "\x1b[33m--------------------------------------------------\x1b[0m"
 
 # Capturar señal de cierre para matar ambos
-trap "kill $BACKEND_PID $FRONTEND_PID" EXIT
+trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null" EXIT
 wait
 

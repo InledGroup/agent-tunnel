@@ -18,11 +18,13 @@ if (!fs.existsSync(GLOBAL_BIN_DIR)) fs.mkdirSync(GLOBAL_BIN_DIR, { recursive: tr
 // Sincronizar scripts al directorio global
 function syncScripts() {
     const scriptsSrc = path.join(__dirname, 'scripts');
-    const files = ['remote-exec.sh', 'shell-hook.sh'];
+    if (!fs.existsSync(scriptsSrc)) return;
+    
+    const files = fs.readdirSync(scriptsSrc);
     files.forEach(f => {
         const src = path.join(scriptsSrc, f);
         const dest = path.join(GLOBAL_BIN_DIR, f);
-        if (fs.existsSync(src)) {
+        if (fs.lstatSync(src).isFile()) {
             fs.copyFileSync(src, dest);
             fs.chmodSync(dest, 0o755); // Asegurar ejecución
         }
@@ -111,7 +113,7 @@ This project is configured to work on a remote environment via SSH transparently
 Instead, **ALWAYS** prefix your terminal commands with the tunnel executor:
 
 \`\`\`bash
-${path.join(__dirname, 'scripts/remote-exec.sh')} "your command here"
+${remoteExecPath} "your command here"
 \`\`\`
 
 All file operations performed locally will be synchronized to the remote machine automatically if Sync is ACTIVE.
@@ -211,8 +213,9 @@ const server = http.createServer((req, res) => {
                         exec(testCmd, (testErr, testStdout) => {
                             if (testErr || !testStdout.includes('success')) {
                                 logEmitter.emit('log', { type: 'error', message: `❌ SSH key rejected. ${testErr ? testErr.message : 'Check authorized_keys.'}` });
+                                activeSshSessions[validSessionName] = { host: config.host, user: config.user, hasMutagen: false, warning: true };
                                 generateActivationFiles(validSessionName, config, originalSessionName, false);
-                                res.writeHead(200); res.end(JSON.stringify({ status: 'warning', message: 'Connected without sync.' }));
+                                res.writeHead(200); res.end(JSON.stringify({ status: 'warning', message: 'Connected without sync (Key rejected).' }));
                                 return;
                             }
 
@@ -309,7 +312,16 @@ const server = http.createServer((req, res) => {
     if (req.url === '/api/log' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => { logEmitter.emit('log', JSON.parse(body)); res.writeHead(200); res.end('OK'); });
+        req.on('end', () => { 
+            try {
+                const data = JSON.parse(body);
+                logEmitter.emit('log', data); 
+                res.writeHead(200); res.end('OK');
+            } catch(e) {
+                console.error("⚠️  Malformed log received:", body);
+                res.writeHead(400); res.end('Invalid JSON');
+            }
+        });
         return;
     }
 
@@ -419,12 +431,20 @@ const server = http.createServer((req, res) => {
 
     // Mutagen Sessions
     if (req.url === '/api/sessions') {
+        // Enviar respuesta inmediata con lo que hay en memoria
+        // Mutagen puede ser lento, así que lo consultamos solo si es necesario o devolvemos lo que tenemos
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            activeSsh: activeSshSessions 
+        }));
+        return;
+    }
+
+    // Nuevo endpoint para los logs de mutagen (pesado)
+    if (req.url === '/api/mutagen-status') {
         exec('mutagen sync list', (err, stdout) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-                output: stdout || '',
-                activeSsh: activeSshSessions 
-            }));
+            res.end(JSON.stringify({ output: stdout || '' }));
         });
         return;
     }
@@ -468,6 +488,31 @@ function useLsFallback(conn, target, res) {
     });
 }
 
-server.listen(PORT, () => {
-    console.log(`[Agent Tunnel] online at http://localhost:${PORT}`);
-});
+function startServer() {
+    server.listen(PORT, () => {
+        console.log(`[Agent Tunnel] online at http://localhost:${PORT}`);
+    }).on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.log(`⚠️  Port ${PORT} in use. Forcing cleanup...`);
+            try {
+                // Comando multiplataforma (macOS/Linux) para matar el proceso en el puerto
+                execSync(`lsof -ti :${PORT} | xargs kill -9 2>/dev/null || true`);
+                console.log(`✨ Port ${PORT} freed. Retrying...`);
+                // Pequeño retardo antes de reintentar
+                setTimeout(() => {
+                    server.listen(PORT, () => {
+                        console.log(`[Agent Tunnel] online at http://localhost:${PORT}`);
+                    });
+                }, 1000);
+            } catch (e) {
+                console.error(`❌ Failed to free port ${PORT}:`, e.message);
+                process.exit(1);
+            }
+        } else {
+            console.error('Server error:', err);
+            process.exit(1);
+        }
+    });
+}
+
+startServer();
