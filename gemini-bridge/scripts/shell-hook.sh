@@ -84,6 +84,34 @@ _gemini_bridge_check_path() {
     return 1
 }
 
+_gemini_is_excluded() {
+    local cmd="$1"
+    local session="$GEMINI_BRIDGE_SESSION"
+    [[ -z "$session" ]] && return 1
+
+    local CONFIG_FILE="$HOME/.gemini-bridge/configs/${session}.json"
+    [[ ! -f "$CONFIG_FILE" ]] && return 1
+
+    local EXCLUDED=$(_gemini_parse_json "$CONFIG_FILE" excluded_commands)
+    local MODE=$(_gemini_parse_json "$CONFIG_FILE" exclude_mode)
+    [[ -z "$EXCLUDED" ]] && return 1
+
+    # Convertir lista separada por comas en un array, manejando espacios alrededor de las comas
+    local clean_excluded=$(echo "$EXCLUDED" | sed 's/[[:space:]]*,[[:space:]]*/,/g' | xargs)
+    IFS=',' read -ra ADDR <<< "$clean_excluded"
+    for item in "${ADDR[@]}"; do
+        [[ -z "$item" ]] && continue
+
+        if [[ "$MODE" == "exact" ]]; then
+            [[ "$cmd" == "$item" ]] && return 0
+        else
+            # Prefix mode (default)
+            [[ "$cmd" == "$item"* ]] && return 0
+        fi
+    done
+    return 1
+}
+
 # --- ZSH HOOK ---
 if [ -n "$ZSH_VERSION" ]; then
     gemini-bridge-accept-line() {
@@ -101,6 +129,12 @@ if [ -n "$ZSH_VERSION" ]; then
             return
         fi
 
+        # Comprobar exclusiones configuradas por el usuario
+        if _gemini_is_excluded "$BUFFER"; then
+            zle .accept-line
+            return
+        fi
+
         if _gemini_bridge_check_path; then
             local EXEC_PATH="${GEMINI_BRIDGE_REMOTE_EXEC:-$HOME/.gemini-bridge/bin/remote-exec.sh}"
             [[ -f "$EXEC_PATH" ]] && BUFFER="$EXEC_PATH $BUFFER"
@@ -108,7 +142,7 @@ if [ -n "$ZSH_VERSION" ]; then
         zle .accept-line
     }
     zle -N accept-line gemini-bridge-accept-line
-    echo -e "🚀 \\x1b[32mGemini Bridge\\x1b[0m Hook Zsh activo. (Comandos: tunnel-off / tunnel-on)"
+    echo -e "🚀 \x1b[32mGemini Bridge\x1b[0m Hook Zsh activo. (Comandos: tunnel-off / tunnel-on)"
 fi
 
 # --- BASH HOOK ---
@@ -124,7 +158,13 @@ if [ -n "$BASH_VERSION" ]; then
         local first_word=$(echo "$BASH_COMMAND" | awk '{print $1}')
         [[ -z "$first_word" || "$first_word" == "cd" || "$first_word" == "exit" ]] && return
 
+        # Comprobar exclusiones configuradas por el usuario
+        if _gemini_is_excluded "$BASH_COMMAND"; then
+            return
+        fi
+
         if _gemini_bridge_check_path; then
+
              local EXEC_PATH="${GEMINI_BRIDGE_REMOTE_EXEC:-$HOME/.gemini-bridge/bin/remote-exec.sh}"
              if [[ -f "$EXEC_PATH" ]]; then
                  # Ejecutar remotamente y cancelar ejecución local

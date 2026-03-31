@@ -84,6 +84,18 @@ import Layout from '../layouts/Layout.astro';
                             <div class="input-group"><i class="fas fa-shield-alt"></i><input type="password" id="pass" class="input-with-icon auto-connect" placeholder="••••••••"></div>
                         </div>
                     </div>
+
+                    <div class="field"><label>Excluded Commands (Local-only)</label>
+                        <div class="input-group"><i class="fas fa-filter"></i><input id="excluded_commands" class="input-with-icon" placeholder="e.g. gemini, git status, docker"></div>
+                        <small style="color: #888; margin-top: 4px; display: block;">Comma-separated list of commands to NOT intercept.</small>
+                    </div>
+                    <div class="field"><label>Exclusion Mode</label>
+                        <select id="exclude_mode" style="width: 100%; padding: 8px; border-radius: 6px; background: #222; color: #eee; border: 1px solid #444; margin-bottom: 10px;">
+                            <option value="prefix">Starts with (Prefix)</option>
+                            <option value="exact">Exact command match</option>
+                        </select>
+                    </div>
+
                     <div class="setting-item-inline">
                         <div class="setting-info">
                             <i class="fas fa-sync-alt"></i>
@@ -94,9 +106,14 @@ import Layout from '../layouts/Layout.astro';
                             <span class="slider"></span>
                         </label>
                     </div>
-                    <button id="btn-test" class="secondary-btn animate-hover" style="margin-top: 4px;">
-                        <i class="fas fa-flask"></i> Verify SSH Access
-                    </button>
+                    <div class="action-buttons-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px;">
+                        <button id="btn-save" class="secondary-btn animate-hover">
+                            <i class="fas fa-save"></i> Save Changes
+                        </button>
+                        <button id="btn-test" class="secondary-btn animate-hover">
+                            <i class="fas fa-flask"></i> Verify SSH
+                        </button>
+                    </div>
                 </div>
 
                 <div class="card fade-in" style="margin-top: 24px;">
@@ -213,6 +230,7 @@ import Layout from '../layouts/Layout.astro';
         function setupEventListeners() {
             document.getElementById('new-session-btn').onclick = newSession;
             document.getElementById('btn-test').onclick = testSSH;
+            document.getElementById('btn-save').onclick = saveConfig;
             document.getElementById('btn-establish').onclick = activateBridge;
             document.getElementById('btn-stop').onclick = stopBridge;
             document.getElementById('clear-logs-btn').onclick = () => document.getElementById('term-body').innerHTML = '';
@@ -337,6 +355,8 @@ import Layout from '../layouts/Layout.astro';
             document.getElementById('user').value = s.user;
             document.getElementById('pass').value = s.password || '';
             document.getElementById('toggle-mutagen').checked = s.use_mutagen !== false;
+            document.getElementById('excluded_commands').value = s.excluded_commands || '';
+            document.getElementById('exclude_mode').value = s.exclude_mode || 'prefix';
             
             // Handle visual state of remote explorer based on mutagen toggle
             const remoteCont = document.getElementById('remote-container');
@@ -526,17 +546,81 @@ import Layout from '../layouts/Layout.astro';
             showToast('Copied to clipboard!', 'info');
         };
 
+        async function saveConfig() {
+            const name = document.getElementById('session_name').value, 
+                  host = document.getElementById('host').value, 
+                  user = document.getElementById('user').value, 
+                  pass = document.getElementById('pass').value, 
+                  useMutagen = document.getElementById('toggle-mutagen').checked,
+                  excludedCommands = document.getElementById('excluded_commands').value,
+                  excludeMode = document.getElementById('exclude_mode').value;
+
+            if (!name) {
+                showToast('Please enter a session name', 'error');
+                return;
+            }
+
+            try {
+                const r = await fetch(`${API_BASE}/api/config`, { 
+                    method: 'POST', 
+                    body: JSON.stringify({ 
+                        session_name: name, 
+                        host, 
+                        user, 
+                        password: pass, 
+                        local_path: selLocal, 
+                        remote_path: useMutagen ? selRemote : '/tmp/ssh-only', 
+                        use_mutagen: useMutagen,
+                        excluded_commands: excludedCommands,
+                        exclude_mode: excludeMode,
+                        only_save: true
+                    }) 
+                });
+
+                const data = await r.json();
+                if (r.ok) { 
+                    showToast('Configuration saved!', 'success'); 
+                    loadConfigs();
+                } else { 
+                    showToast('Save Error: ' + data.message, 'error'); 
+                }
+            } catch(e) { 
+                showToast('Error: ' + e.message, 'error'); 
+            }
+        }
+
         async function activateBridge() {
-            const name = document.getElementById('session_name').value, host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value, useMutagen = document.getElementById('toggle-mutagen').checked;
-            if (!name || !host || !user || !selLocal || (useMutagen && !selRemote)) { 
+            const name = document.getElementById('session_name').value, 
+                  host = document.getElementById('host').value, 
+                  user = document.getElementById('user').value, 
+                  pass = document.getElementById('pass').value, 
+                  useMutagen = document.getElementById('toggle-mutagen').checked,
+                  excludedCommands = document.getElementById('excluded_commands').value,
+                  excludeMode = document.getElementById('exclude_mode').value;
+
+            if (!name || !host || !user || !selLocal || (useMutagen && !selRemote)) {
                 showToast('Please fill all fields and select paths', 'error');
-                return; 
+                return;
             }
             const configRemotePath = useMutagen ? selRemote : '/tmp/ssh-only';
-            
+
             document.getElementById('loading-overlay').style.display = 'flex';
             try {
-                const r = await fetch(`${API_BASE}/api/config`, { method: 'POST', body: JSON.stringify({ session_name: name, host, user, password: pass, local_path: selLocal, remote_path: configRemotePath, use_mutagen: useMutagen }) });
+                const r = await fetch(`${API_BASE}/api/config`, { 
+                    method: 'POST', 
+                    body: JSON.stringify({ 
+                        session_name: name, 
+                        host, 
+                        user, 
+                        password: pass, 
+                        local_path: selLocal, 
+                        remote_path: configRemotePath, 
+                        use_mutagen: useMutagen,
+                        excluded_commands: excludedCommands,
+                        exclude_mode: excludeMode
+                    }) 
+                });
+
                 document.getElementById('loading-overlay').style.display = 'none';
                 const data = await r.json();
                 if (data.status === 'warning') { 

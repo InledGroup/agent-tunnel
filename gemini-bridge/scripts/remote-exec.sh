@@ -43,7 +43,6 @@ CURRENT_DIR=$(_gemini_normalize_path "$(pwd)")
 CONFIGS_DIR="$HOME/.gemini-bridge/configs"
 
 # Prioridad 1: Buscar si el directorio actual coincide con alguna config guardada
-# Esto evita usar una sesión antigua de variables de entorno (como router2 si ahora estás en skyrouter)
 MATCHED_CONFIG=""
 for f in "$CONFIGS_DIR"/*.json; do
     [ -e "$f" ] || continue
@@ -54,6 +53,34 @@ for f in "$CONFIGS_DIR"/*.json; do
         break
     fi
 done
+
+# --- LOGICA DE EXCLUSION ---
+if [[ -n "$MATCHED_CONFIG" ]]; then
+    EXCLUDED=$(_gemini_parse_json "$MATCHED_CONFIG" excluded_commands)
+    MODE=$(_gemini_parse_json "$MATCHED_CONFIG" exclude_mode)
+    CMD_STR="$*"
+    
+    if [[ -n "$EXCLUDED" ]]; then
+        IFS=',' read -ra ADDR <<< "$EXCLUDED"
+        for item in "${ADDR[@]}"; do
+            item=$(echo "$item" | xargs)
+            [[ -z "$item" ]] && continue
+            if [[ "$MODE" == "exact" ]]; then
+                if [[ "$CMD_STR" == "$item" ]]; then
+                    echo -e "⚙️  \\x1b[33m[Agent Tunnel] Excluded command (Exact match):\\x1b[0m Executing locally..."
+                    eval "$@"
+                    exit $?
+                fi
+            else
+                if [[ "$CMD_STR" == "$item"* ]]; then
+                    echo -e "⚙️  \\x1b[33m[Agent Tunnel] Excluded command (Prefix match):\\x1b[0m Executing locally..."
+                    eval "$@"
+                    exit $?
+                fi
+            fi
+        done
+    fi
+fi
 
 if [[ -n "$MATCHED_CONFIG" ]]; then
     HOST=$(_gemini_parse_json "$MATCHED_CONFIG" host)

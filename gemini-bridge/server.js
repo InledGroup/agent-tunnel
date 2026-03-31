@@ -180,9 +180,17 @@ const server = http.createServer((req, res) => {
             const config = JSON.parse(body);
             const originalSessionName = config.session_name || 'agent-tunnel';
             const validSessionName = originalSessionName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
-            const configFile = path.join(CONFIGS_DIR, `${originalSessionName}.json`);
+            const configFile = path.join(CONFIGS_DIR, `${validSessionName}.json`);
             const useMutagen = config.use_mutagen !== false; // Default a true
+            const onlySave = config.only_save === true;
             
+            if (onlySave) {
+                logEmitter.emit('log', { type: 'system', message: `💾 Configuration saved: ${validSessionName}` });
+                fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
+                res.writeHead(200); res.end(JSON.stringify({ status: 'success', message: 'Configuration saved.' }));
+                return;
+            }
+
             logEmitter.emit('log', { type: 'system', message: `🚀 Establishing Tunnel: ${originalSessionName} (${useMutagen ? 'SSH+Sync' : 'SSH-Only'})` });
             fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
 
