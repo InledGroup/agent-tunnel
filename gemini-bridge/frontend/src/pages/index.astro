@@ -76,12 +76,15 @@ import Layout from '../layouts/Layout.astro';
                     <div class="field"><label>Remote Host (IP or Domain)</label>
                         <div class="input-group"><i class="fas fa-globe"></i><input id="host" class="input-with-icon auto-connect" placeholder="192.168.1.1"></div>
                     </div>
-                    <div class="grid-sub2">
+                    <div class="grid-sub3">
                         <div class="field"><label>Username</label>
                             <div class="input-group"><i class="fas fa-user"></i><input id="user" class="input-with-icon auto-connect" placeholder="root"></div>
                         </div>
                         <div class="field"><label>Auth Password</label>
                             <div class="input-group"><i class="fas fa-shield-alt"></i><input type="password" id="pass" class="input-with-icon auto-connect" placeholder="••••••••"></div>
+                        </div>
+                        <div class="field"><label>Port</label>
+                            <div class="input-group"><i class="fas fa-plug"></i><input id="port" class="input-with-icon auto-connect" placeholder="22"></div>
                         </div>
                     </div>
 
@@ -353,6 +356,7 @@ import Layout from '../layouts/Layout.astro';
             document.getElementById('session_name').value = name;
             document.getElementById('host').value = s.host;
             document.getElementById('user').value = s.user;
+            document.getElementById('port').value = s.port || '22';
             document.getElementById('pass').value = s.password || '';
             document.getElementById('toggle-mutagen').checked = s.use_mutagen !== false;
             document.getElementById('excluded_commands').value = s.excluded_commands || '';
@@ -410,11 +414,14 @@ import Layout from '../layouts/Layout.astro';
         }
 
         async function browseRemote(path = '/') {
-            const host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
+            const host = document.getElementById('host').value, 
+                  user = document.getElementById('user').value, 
+                  port = document.getElementById('port').value || '22',
+                  pass = document.getElementById('pass').value;
             if (!host || !user || !document.getElementById('toggle-mutagen').checked) return;
             document.getElementById('remote-spinner').style.display = 'block';
             try {
-                const r = await fetch(`${API_BASE}/api/ls-remote`, { method: 'POST', body: JSON.stringify({ host, user, password: pass, remote_path: path }) });
+                const r = await fetch(`${API_BASE}/api/ls-remote`, { method: 'POST', body: JSON.stringify({ host, user, port, password: pass, remote_path: path }) });
                 const data = await r.json();
                 if (data.error) {
                     showToast(`Remote Error: ${data.error}`, 'error');
@@ -550,6 +557,7 @@ import Layout from '../layouts/Layout.astro';
             const name = document.getElementById('session_name').value, 
                   host = document.getElementById('host').value, 
                   user = document.getElementById('user').value, 
+                  port = document.getElementById('port').value || '22',
                   pass = document.getElementById('pass').value, 
                   useMutagen = document.getElementById('toggle-mutagen').checked,
                   excludedCommands = document.getElementById('excluded_commands').value,
@@ -567,6 +575,7 @@ import Layout from '../layouts/Layout.astro';
                         session_name: name, 
                         host, 
                         user, 
+                        port,
                         password: pass, 
                         local_path: selLocal, 
                         remote_path: useMutagen ? selRemote : '/tmp/ssh-only', 
@@ -593,6 +602,7 @@ import Layout from '../layouts/Layout.astro';
             const name = document.getElementById('session_name').value, 
                   host = document.getElementById('host').value, 
                   user = document.getElementById('user').value, 
+                  port = document.getElementById('port').value || '22',
                   pass = document.getElementById('pass').value, 
                   useMutagen = document.getElementById('toggle-mutagen').checked,
                   excludedCommands = document.getElementById('excluded_commands').value,
@@ -612,6 +622,7 @@ import Layout from '../layouts/Layout.astro';
                         session_name: name, 
                         host, 
                         user, 
+                        port,
                         password: pass, 
                         local_path: selLocal, 
                         remote_path: configRemotePath, 
@@ -662,14 +673,17 @@ import Layout from '../layouts/Layout.astro';
         }
 
         async function testSSH() {
-            const host = document.getElementById('host').value, user = document.getElementById('user').value, pass = document.getElementById('pass').value;
+            const host = document.getElementById('host').value, 
+                  user = document.getElementById('user').value, 
+                  port = document.getElementById('port').value || '22',
+                  pass = document.getElementById('pass').value;
             if (!host || !user) {
                 showToast('Enter host and user first', 'error');
                 return;
             }
             const btn = document.getElementById('btn-test'); btn.disabled = true; btn.innerText = 'Checking...';
             try {
-                const r = await fetch(`${API_BASE}/api/test-ssh`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host, user, password: pass}) });
+                const r = await fetch(`${API_BASE}/api/test-ssh`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host, user, port, password: pass}) });
                 const data = await r.json();
                 if (data.status === 'success') {
                     showToast('SSH Access Confirmed!', 'success');
@@ -840,6 +854,7 @@ import Layout from '../layouts/Layout.astro';
     input:focus { border-color: var(--accent); }
 
     .grid-sub2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-sub3 { display: grid; grid-template-columns: 1fr 1fr 0.6fr; gap: 16px; }
 
     button { 
         padding: 10px 16px; 

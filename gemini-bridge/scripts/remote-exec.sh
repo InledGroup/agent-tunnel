@@ -84,6 +84,7 @@ fi
 
 if [[ -n "$MATCHED_CONFIG" ]]; then
     HOST=$(_gemini_parse_json "$MATCHED_CONFIG" host)
+    PORT=$(_gemini_parse_json "$MATCHED_CONFIG" port)
     USER=$(_gemini_parse_json "$MATCHED_CONFIG" user)
     REMOTE_ROOT=$(_gemini_parse_json "$MATCHED_CONFIG" remote_path)
     SESSION_NAME=$(basename "$MATCHED_CONFIG" .json)
@@ -91,11 +92,13 @@ if [[ -n "$MATCHED_CONFIG" ]]; then
 else
     # Fallback a variables de entorno si no hay match por directorio
     HOST="${GEMINI_BRIDGE_HOST}"
+    PORT="${GEMINI_BRIDGE_PORT}"
     USER="${GEMINI_BRIDGE_USER}"
     LOCAL_ROOT="${GEMINI_BRIDGE_PROJECT_ROOT}"
     REMOTE_ROOT="${GEMINI_BRIDGE_REMOTE_ROOT}"
     SESSION_NAME="${GEMINI_BRIDGE_SESSION}"
 fi
+PORT="${PORT:-22}"
 
 # 2. VERIFICACIÓN DE SESIÓN ACTIVA
 IS_ACTIVE="false"
@@ -158,7 +161,7 @@ else
     SSH_CMD="cd \"$FINAL_REMOTE_PATH\" 2>/dev/null || cd ~; $COMMAND"
 fi
 
-OUTPUT=$(ssh $SSH_OPTS "$USER@$HOST" "$SSH_CMD" 2>&1)
+OUTPUT=$(ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" "$SSH_CMD" 2>&1)
 EXIT_CODE=$?
 
 if [[ $EXIT_CODE -eq 255 ]]; then
