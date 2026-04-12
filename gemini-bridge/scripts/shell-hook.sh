@@ -6,30 +6,33 @@ export GEMINI_BRIDGE_ENABLED="true"
 
 # 1. Utility functions (Robust Parsing)
 _gemini_parse_json() {
-    python3 -c "
-import sys, json
-try:
-    content = sys.argv[1]
-    key = sys.argv[2]
-    if content.startswith('{') or content.startswith('['):
-        data = json.loads(content)
-    else:
-        with open(content, 'r') as f:
-            data = json.load(f)
+    node -e "
+try {
+    const fs = require('fs');
+    const content = process.argv[1];
+    const key = process.argv[2];
+    let data;
+    if (content.startsWith('{') || content.startsWith('[')) {
+        data = JSON.parse(content);
+    } else {
+        data = JSON.parse(fs.readFileSync(content, 'utf8'));
+    }
     
-    val = data
-    for part in key.split('.'):
-        if isinstance(val, dict):
-            val = val.get(part, '')
-        else:
-            val = ''
-            break
-    if isinstance(val, (dict, list)):
-        print(json.dumps(val))
-    else:
-        print(val)
-except Exception:
-    pass
+    let val = data;
+    for (const part of key.split('.')) {
+        if (val && typeof val === 'object') {
+            val = val[part];
+        } else {
+            val = '';
+            break;
+        }
+    }
+    if (val && typeof val === 'object') {
+        console.log(JSON.stringify(val));
+    } else {
+        console.log(val || '');
+    }
+} catch (e) {}
 " "$1" "$2"
 }
 

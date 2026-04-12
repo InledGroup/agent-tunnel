@@ -49,6 +49,20 @@ if (fs.existsSync(SETTINGS_FILE)) {
 
 const logEmitter = new events.EventEmitter();
 let activeSshSessions = {}; // Rastrear sesiones SSH activas por nombre
+let mutagenCache = { output: '', lastUpdate: 0 };
+
+async function getMutagenStatus() {
+    const NOW = Date.now();
+    if (NOW - mutagenCache.lastUpdate < 2000) return mutagenCache.output;
+    
+    return new Promise((resolve) => {
+        exec('mutagen sync list', (err, stdout) => {
+            mutagenCache.output = stdout || '';
+            mutagenCache.lastUpdate = Date.now();
+            resolve(mutagenCache.output);
+        });
+    });
+}
 
 function ensureSshKey() {
     const sshDir = path.join(os.homedir(), '.ssh');
@@ -135,7 +149,7 @@ const server = http.createServer((req, res) => {
     }
     
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, HEAD');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Cache-Control, Last-Event-ID');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
 
     if (req.method === 'OPTIONS') {
@@ -441,12 +455,13 @@ const server = http.createServer((req, res) => {
 
     // Mutagen Sessions
     if (req.url === '/api/sessions') {
-        // Enviar respuesta inmediata con lo que hay en memoria
-        // Mutagen puede ser lento, así que lo consultamos solo si es necesario o devolvemos lo que tenemos
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-            activeSsh: activeSshSessions 
-        }));
+        getMutagenStatus().then(output => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+                activeSsh: activeSshSessions,
+                output: output
+            }));
+        });
         return;
     }
 

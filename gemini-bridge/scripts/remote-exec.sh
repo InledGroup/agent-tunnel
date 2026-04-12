@@ -4,30 +4,33 @@
 
 # 1. Utility functions
 _gemini_parse_json() {
-    python3 -c "
-import sys, json
-try:
-    content = sys.argv[1]
-    key = sys.argv[2]
-    if content.startswith('{') or content.startswith('['):
-        data = json.loads(content)
-    else:
-        with open(content, 'r') as f:
-            data = json.load(f)
+    node -e "
+try {
+    const fs = require('fs');
+    const content = process.argv[1];
+    const key = process.argv[2];
+    let data;
+    if (content.startsWith('{') || content.startsWith('[')) {
+        data = JSON.parse(content);
+    } else {
+        data = JSON.parse(fs.readFileSync(content, 'utf8'));
+    }
     
-    val = data
-    for part in key.split('.'):
-        if isinstance(val, dict):
-            val = val.get(part, '')
-        else:
-            val = ''
-            break
-    if isinstance(val, (dict, list)):
-        print(json.dumps(val))
-    else:
-        print(val)
-except Exception:
-    pass
+    let val = data;
+    for (const part of key.split('.')) {
+        if (val && typeof val === 'object') {
+            val = val[part];
+        } else {
+            val = '';
+            break;
+        }
+    }
+    if (val && typeof val === 'object') {
+        console.log(JSON.stringify(val));
+    } else {
+        console.log(val || '');
+    }
+} catch (e) {}
 " "$1" "$2"
 }
 
@@ -143,10 +146,9 @@ FINAL_REMOTE_PATH=$(_gemini_normalize_path "${REMOTE_ROOT}${RELATIVE_PATH}")
 COMMAND="$*"
 
 # 4. Log al servidor de forma segura
-LOG_PAYLOAD=$(python3 -c "
-import sys, json
-data = {'type': 'command', 'cmd': sys.argv[1], 'path': sys.argv[2]}
-print(json.dumps(data))
+LOG_PAYLOAD=$(node -e "
+const data = { type: 'command', cmd: process.argv[1], path: process.argv[2] };
+console.log(JSON.stringify(data));
 " "$COMMAND" "$FINAL_REMOTE_PATH")
 curl -s -X POST -H "Content-Type: application/json" -d "$LOG_PAYLOAD" http://127.0.0.1:3456/api/log > /dev/null
 
@@ -172,14 +174,15 @@ if [[ $EXIT_CODE -eq 255 ]]; then
 fi
 
 # 6. Log del resultado de forma segura
-RESULT_PAYLOAD=$(python3 -c "
-import sys, json
-try:
-    exit_code = int(sys.argv[2])
-except:
-    exit_code = 1
-data = {'type': 'result', 'cmd': sys.argv[1], 'exit_code': exit_code, 'output': sys.argv[3]}
-print(json.dumps(data))
+RESULT_PAYLOAD=$(node -e "
+let exit_code;
+try {
+    exit_code = parseInt(process.argv[2]);
+} catch (e) {
+    exit_code = 1;
+}
+const data = { type: 'result', cmd: process.argv[1], exit_code: exit_code, output: process.argv[3] };
+console.log(JSON.stringify(data));
 " "$COMMAND" "$EXIT_CODE" "$OUTPUT")
 curl -s -X POST -H "Content-Type: application/json" -d "$RESULT_PAYLOAD" http://127.0.0.1:3456/api/log > /dev/null
 
