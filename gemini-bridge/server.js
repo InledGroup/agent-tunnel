@@ -53,7 +53,7 @@ let mutagenCache = { output: '', lastUpdate: 0 };
 
 async function getMutagenStatus() {
     const NOW = Date.now();
-    if (NOW - mutagenCache.lastUpdate < 2000) return mutagenCache.output;
+    if (NOW - mutagenCache.lastUpdate < 1000) return mutagenCache.output;
     
     return new Promise((resolve) => {
         exec('mutagen sync list', (err, stdout) => {

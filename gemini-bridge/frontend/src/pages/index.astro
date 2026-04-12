@@ -63,7 +63,12 @@ import Layout from '../layouts/Layout.astro';
                 </div>
                 <div class="progress-bg"><div id="sync-bar" class="progress-fill"></div></div>
                 <div id="sync-details"></div>
-            </div>
+                <div id="sync-meta" style="font-size: 10px; color: var(--text-muted); margin-top: 6px; display: flex; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 6px;">
+                   <span id="sync-eta"></span>
+                   <span id="sync-file" style="text-align: right; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
+                </div>
+                </div>
+
         </section>
     </aside>
 
@@ -518,11 +523,28 @@ import Layout from '../layouts/Layout.astro';
                     progBox.style.display = 'none';
                 } else if (isStaging) {
                     dot.className = 'status-dot syncing'; txt.innerText = 'Synchronizing...'; progBox.style.display = 'block';
-                    const matchPercent = out.match(/(\d+)%/), matchEntries = out.match(/(\d+\/\d+ entries)/) || out.match(/(\d+ entries)/), statusMsg = out.match(/Status: ([^\n\(]+)/);
-                    if (matchPercent) { document.getElementById('sync-percent').innerText = matchPercent[0]; document.getElementById('sync-bar').style.width = matchPercent[0]; }
-                    else { document.getElementById('sync-percent').innerText = '...'; document.getElementById('sync-bar').style.width = '100%'; }
+                    
+                    const matchPercent = out.match(/(\d+)%/);
+                    const matchEntries = out.match(/(\d+\/\d+ entries)/) || out.match(/(\d+ entries)/);
+                    const statusMsg = out.match(/Status: ([^\n\(]+)/);
+                    const matchEta = out.match(/(\d+s|\d+m) remaining/);
+                    // Intentar capturar el nombre de archivo o acción específica si existe en los detalles
+                    const matchFile = out.match(/Applying changes: (?:[^\n]*)\(([^\)]+)\)/) || out.match(/Staging (?:files?|changes?): (?:[^\n]*)\(([^\)]+)\)/);
+
+                    if (matchPercent) { 
+                        document.getElementById('sync-percent').innerText = matchPercent[0]; 
+                        document.getElementById('sync-bar').style.width = matchPercent[0]; 
+                    } else { 
+                        document.getElementById('sync-percent').innerText = '...'; 
+                        document.getElementById('sync-bar').style.width = '100%'; 
+                    }
+                    
                     if (statusMsg) document.getElementById('sync-status-msg').innerText = statusMsg[1].trim();
                     if (matchEntries) document.getElementById('sync-details').innerText = matchEntries[0];
+                    
+                    document.getElementById('sync-eta').innerText = matchEta ? `⏳ ${matchEta[0]}` : '';
+                    document.getElementById('sync-file').innerText = matchFile ? matchFile[1] : '';
+
                 } else if (isActive) {
                     dot.className = 'status-dot syncing'; txt.innerText = 'Establishing...'; progBox.style.display = 'block';
                 } else {
