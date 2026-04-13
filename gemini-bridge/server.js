@@ -139,6 +139,22 @@ All file operations performed locally will be synchronized to the remote machine
     return instrFile;
 }
 
+function getConnectOpts(config) {
+    const opts = { 
+        host: config.host, 
+        port: config.port || 22, 
+        username: config.user, 
+        readyTimeout: 15000 
+    };
+    if (config.ssh_key && fs.existsSync(config.ssh_key)) {
+        opts.privateKey = fs.readFileSync(config.ssh_key);
+    } else if (process.env.SSH_AUTH_SOCK) {
+        opts.agent = process.env.SSH_AUTH_SOCK;
+    }
+    if (config.password) opts.password = config.password;
+    return opts;
+}
+
 const server = http.createServer((req, res) => {
     // CORS: Permitir acceso desde el puerto de desarrollo de Astro (4321) y el estático (3456)
     const origin = req.headers.origin;
@@ -221,6 +237,27 @@ const server = http.createServer((req, res) => {
             
             logEmitter.emit('log', { type: 'system', message: `🔍 Checking SSH at ${config.host}:${config.port || 22}...` });
 
+            // Preparar opciones de conexión
+            const connectOpts = { 
+                host: config.host, 
+                port: config.port || 22, 
+                username: config.user, 
+                readyTimeout: 15000 
+            };
+            
+            // Prioridad 1: Llave personalizada
+            if (config.ssh_key && fs.existsSync(config.ssh_key)) {
+                connectOpts.privateKey = fs.readFileSync(config.ssh_key);
+            } 
+            // Prioridad 2: SSH Agent
+            else if (process.env.SSH_AUTH_SOCK) {
+                connectOpts.agent = process.env.SSH_AUTH_SOCK;
+            }
+            // Prioridad 3: Contraseña (si existe)
+            if (config.password) {
+                connectOpts.password = config.password;
+            }
+
             conn.on('ready', () => {
                 logEmitter.emit('log', { type: 'system', message: '✅ SSH connected. Authorizing key...' });
                 
@@ -230,9 +267,11 @@ const server = http.createServer((req, res) => {
                 conn.exec(setupCmd, (err2, stream2) => {
                     const finalizeSsh = () => {
                         conn.end();
-                        const sshKeyPath = path.join(os.homedir(), '.ssh', 'id_ed25519_bridge');
-                        const compatOpts = "-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5";
-                        const testCmd = `ssh ${compatOpts} -p ${config.port || 22} -i "${sshKeyPath}" ${config.user}@${config.host} "echo 'success'"`;
+                        const bridgeKeyPath = path.join(os.homedir(), '.ssh', 'id_ed25519_bridge');
+                        const sshKeyPath = (config.ssh_key && fs.existsSync(config.ssh_key)) ? config.ssh_key : bridgeKeyPath;
+
+                        const compatOpts = `-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ${fs.existsSync(sshKeyPath) ? `-i "${sshKeyPath}"` : ""}`;
+                        const testCmd = `ssh ${compatOpts} -p ${config.port || 22} ${config.user}@${config.host} "echo 'success'"`;
                         
                         exec(testCmd, (testErr, testStdout) => {
                             if (testErr || !testStdout.includes('success')) {
@@ -253,7 +292,7 @@ const server = http.createServer((req, res) => {
 
                             logEmitter.emit('log', { type: 'system', message: '✅ Key validated. Starting Mutagen...' });
                             exec(`mutagen sync terminate "${validSessionName}"`, () => {
-                                const mutagenEnv = { ...process.env, MUTAGEN_SSH_PATH: `ssh ${compatOpts} -p ${config.port || 22} -i "${sshKeyPath}"` };
+                                const mutagenEnv = { ...process.env, MUTAGEN_SSH_PATH: `ssh ${compatOpts} -p ${config.port || 22}` };
                                 const mutagenProc = spawn('mutagen', [
                                     'sync', 'create', `--name=${validSessionName}`,
                                     config.local_path, `${config.user}@${config.host}:${config.remote_path}`,
@@ -280,7 +319,7 @@ const server = http.createServer((req, res) => {
                 if (!res.writableEnded) {
                     res.writeHead(500); res.end(JSON.stringify({ status: 'error', message: err.message }));
                 }
-            }).connect({ host: config.host, port: config.port || 22, username: config.user, password: config.password, readyTimeout: 15000 });
+            }).connect(getConnectOpts(config));
         });
         return;
     }
@@ -378,7 +417,7 @@ const server = http.createServer((req, res) => {
             const conn = new Client();
             conn.on('ready', () => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'success' })); conn.end(); })
                 .on('error', (err) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'error', message: err.message })); })
-                .connect({ host: config.host, port: config.port || 22, username: config.user, password: config.password, timeout: 5000 });
+                .connect(getConnectOpts(config));
         });
         return;
     }
@@ -448,7 +487,7 @@ const server = http.createServer((req, res) => {
                         conn.end();
                     });
                 });
-            }).on('error', (err) => { res.writeHead(200); res.end(JSON.stringify({ error: err.message })); }).connect({ host: config.host, port: config.port || 22, username: config.user, password: config.password, timeout: 5000 });
+            }).on('error', (err) => { res.writeHead(200); res.end(JSON.stringify({ error: err.message })); }).connect(getConnectOpts(config));
         });
         return;
     }

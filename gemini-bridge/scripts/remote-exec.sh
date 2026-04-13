@@ -189,9 +189,17 @@ console.log(JSON.stringify(data));
 curl -s -X POST -H "Content-Type: application/json" -d "$LOG_PAYLOAD" http://127.0.0.1:3456/api/log > /dev/null
 
 # 5. Ejecución remota vía SSH
-SSH_KEY="$HOME/.ssh/id_ed25519_bridge"
+# Intentar obtener llave personalizada de la config si existe
+CUSTOM_KEY=$(_gemini_parse_json "$MATCHED_CONFIG" ssh_key)
+SSH_KEY="${CUSTOM_KEY:-$HOME/.ssh/id_ed25519_bridge}"
+
 SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-[ -f "$SSH_KEY" ] && SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
+
+# Si la llave (personalizada o del bridge) existe, la añadimos como una de las identidades a intentar
+# Pero NO usamos IdentitiesOnly=yes para que ssh pueda usar otras llaves del agente o default
+if [ -f "$SSH_KEY" ]; then
+    SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
+fi
 
 if [[ "$GEMINI_BRIDGE_HAS_MUTAGEN" == "true" ]]; then
     SSH_CMD="mkdir -p \"$FINAL_REMOTE_PATH\" && cd \"$FINAL_REMOTE_PATH\" && $COMMAND"
