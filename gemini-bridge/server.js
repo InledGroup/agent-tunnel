@@ -301,7 +301,8 @@ const server = http.createServer((req, res) => {
 
                                 mutagenProc.on('close', (code) => {
                                     const success = (code === 0);
-                                    if (success) activeSshSessions[validSessionName] = { host: config.host, user: config.user, port: config.port || 22, hasMutagen: true };
+                                    // Guardamos siempre el estado, aunque falle Mutagen (para poder cerrarlo bien después)
+                                    activeSshSessions[validSessionName] = { host: config.host, user: config.user, port: config.port || 22, hasMutagen: success };
                                     generateActivationFiles(validSessionName, config, originalSessionName, success);
                                     logEmitter.emit('log', { type: 'system', message: success ? '✨ Tunnel & Sync active!' : '⚠️ Sync failed. Direct Mode only.' });
                                     if (!res.writableEnded) {
@@ -356,10 +357,22 @@ const server = http.createServer((req, res) => {
             const identifier = id || name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
             
             logEmitter.emit('log', { type: 'system', message: `🛑 Terminating tunnel: ${name}...` });
+            
+            // Verificamos si la sesión tenía Mutagen activo antes de borrarla de memoria
+            const session = activeSshSessions[identifier];
+            const hasMutagen = session ? session.hasMutagen : true; // Por defecto intentamos terminate si no está en memoria
+            
             delete activeSshSessions[identifier];
             
+            if (!hasMutagen) {
+                logEmitter.emit('log', { type: 'system', message: `✨ Tunnel stopped (SSH-Only).` });
+                res.writeHead(200); res.end(JSON.stringify({ status: 'success' }));
+                return;
+            }
+
             exec(`mutagen sync terminate "${identifier}"`, (err, stdout, stderr) => {
-                if (err) {
+                // Si el error es simplemente que la sesión no existe, lo tratamos como éxito
+                if (err && !(stderr && stderr.includes("unable to locate requested sessions"))) {
                     logEmitter.emit('log', { type: 'error', message: `❌ Mutagen error: ${stderr || err.message}` });
                     res.writeHead(500); res.end(JSON.stringify({ status: 'error', message: stderr || err.message }));
                 } else {
