@@ -132,6 +132,12 @@ Instead, **ALWAYS** prefix your terminal commands with the tunnel executor:
 ${remoteExecPath} "your command here"
 \`\`\`
 
+**FOR INTERACTIVE COMMANDS** (e.g., \`sudo\`, \`btop\`, \`vim\`, \`htop\`, \`nano\`, or any command requiring user input or a TUI), you **MUST** use the \`--interactive\` flag:
+
+\`\`\`bash
+${remoteExecPath} --interactive "sudo apt update"
+\`\`\`
+
 All file operations performed locally will be synchronized to the remote machine automatically if Sync is ACTIVE.
 `.trim();
     

@@ -41,6 +41,13 @@ _gemini_normalize_path() {
     echo "$p"
 }
 
+# --- PARSE FLAGS ---
+FORCE_INTERACTIVE=false
+if [[ "$1" == "--interactive" || "$1" == "-it" ]]; then
+    FORCE_INTERACTIVE=true
+    shift
+fi
+
 # --- DETECCIÓN DE CONFIGURACIÓN ---
 CURRENT_DIR=$(_gemini_normalize_path "$(pwd)")
 CONFIGS_DIR="$HOME/.gemini-bridge/configs"
@@ -193,7 +200,13 @@ curl -s -X POST -H "Content-Type: application/json" -d "$LOG_PAYLOAD" http://127
 CUSTOM_KEY=$(_gemini_parse_json "$MATCHED_CONFIG" ssh_key)
 SSH_KEY="${CUSTOM_KEY:-$HOME/.ssh/id_ed25519_bridge}"
 
-SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+if [[ "$FORCE_INTERACTIVE" == "true" ]]; then
+    SSH_OPTS="$SSH_OPTS -t"
+else
+    SSH_OPTS="$SSH_OPTS -o BatchMode=yes"
+fi
 
 # Si la llave (personalizada o del bridge) existe, la añadimos como una de las identidades a intentar
 # Pero NO usamos IdentitiesOnly=yes para que ssh pueda usar otras llaves del agente o default
@@ -207,14 +220,28 @@ else
     SSH_CMD="cd \"$FINAL_REMOTE_PATH\" 2>/dev/null || cd ~; $COMMAND"
 fi
 
-OUTPUT=$(ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" "$SSH_CMD" 2>&1)
-EXIT_CODE=$?
+if [[ "$FORCE_INTERACTIVE" == "true" ]]; then
+    # MODO INTERACTIVO: Ejecución directa conectada a la terminal
+    ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" "$SSH_CMD"
+    EXIT_CODE=$?
+    OUTPUT="<Interactive Session (Output not captured)>"
+    
+    if [[ $EXIT_CODE -eq 255 ]]; then
+        echo -e "\\x1b[33m[Agent Tunnel] SSH Connection Error (Interactive). Falling back to local execution...\\x1b[0m"
+        eval "$@"
+        exit $?
+    fi
+else
+    # MODO NORMAL: Captura de output para logging
+    OUTPUT=$(ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" "$SSH_CMD" 2>&1)
+    EXIT_CODE=$?
 
-if [[ $EXIT_CODE -eq 255 ]]; then
-    echo -e "❌ \\x1b[31m[Agent Tunnel] SSH Connection Error:\\x1b[0m\n$OUTPUT"
-    echo -e "\\x1b[33mFalling back to local execution...\\x1b[0m"
-    eval "$@"
-    exit $?
+    if [[ $EXIT_CODE -eq 255 ]]; then
+        echo -e "❌ \\x1b[31m[Agent Tunnel] SSH Connection Error:\\x1b[0m\n$OUTPUT"
+        echo -e "\\x1b[33mFalling back to local execution...\\x1b[0m"
+        eval "$@"
+        exit $?
+    fi
 fi
 
 # 6. Log del resultado de forma segura
@@ -230,5 +257,7 @@ console.log(JSON.stringify(data));
 " "$COMMAND" "$EXIT_CODE" "$OUTPUT")
 curl -s -X POST -H "Content-Type: application/json" -d "$RESULT_PAYLOAD" http://127.0.0.1:3456/api/log > /dev/null
 
-echo "$OUTPUT"
+if [[ "$FORCE_INTERACTIVE" == "false" ]]; then
+    echo "$OUTPUT"
+fi
 exit $EXIT_CODE
