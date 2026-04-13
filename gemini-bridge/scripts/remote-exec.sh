@@ -45,17 +45,56 @@ _gemini_normalize_path() {
 CURRENT_DIR=$(_gemini_normalize_path "$(pwd)")
 CONFIGS_DIR="$HOME/.gemini-bridge/configs"
 
-# Prioridad 1: Buscar si el directorio actual coincide con alguna config guardada
+# Intentar obtener sesiones activas del servidor para resolver ambigüedades
+SESSIONS_JSON=$(curl -s --max-time 2 http://127.0.0.1:3456/api/sessions 2>/dev/null)
+CURL_EXIT=$?
+
 MATCHED_CONFIG=""
-for f in "$CONFIGS_DIR"/*.json; do
-    [ -e "$f" ] || continue
-    LP=$(_gemini_parse_json "$f" local_path)
-    LP=$(_gemini_normalize_path "$LP")
-    if [[ -n "$LP" && "$CURRENT_DIR" == "$LP"* ]]; then
-        MATCHED_CONFIG="$f"
-        break
+
+# Prioridad 0: Si ya tenemos una sesión forzada por variables de entorno, la usamos directamente
+if [[ -n "$GEMINI_BRIDGE_SESSION" && -f "$CONFIGS_DIR/${GEMINI_BRIDGE_SESSION}.json" ]]; then
+    MATCHED_CONFIG="$CONFIGS_DIR/${GEMINI_BRIDGE_SESSION}.json"
+else
+    # Prioridad 1: Buscar si el directorio actual coincide con alguna config guardada
+    MATCHED_CONFIGS=()
+    for f in "$CONFIGS_DIR"/*.json; do
+        [ -e "$f" ] || continue
+        LP=$(_gemini_parse_json "$f" local_path)
+        LP=$(_gemini_normalize_path "$LP")
+        if [[ -n "$LP" && "$CURRENT_DIR" == "$LP"* ]]; then
+            MATCHED_CONFIGS+=("$f")
+        fi
+    done
+
+    if [[ ${#MATCHED_CONFIGS[@]} -eq 1 ]]; then
+        MATCHED_CONFIG="${MATCHED_CONFIGS[0]}"
+    elif [[ ${#MATCHED_CONFIGS[@]} -gt 1 ]]; then
+        # Ambigüedad: Intentar resolver con el servidor si está activo
+        if [[ $CURL_EXIT -eq 0 && -n "$SESSIONS_JSON" ]]; then
+            for conf in "${MATCHED_CONFIGS[@]}"; do
+                S_NAME=$(basename "$conf" .json)
+                VALID_S=$(echo "$S_NAME" | sed 's/ /-/g' | sed 's/[^a-zA-Z0-9_-]//g')
+                ACTIVE_VAL=$(_gemini_parse_json "$SESSIONS_JSON" "activeSsh.$VALID_S")
+                if [[ -n "$ACTIVE_VAL" && "$ACTIVE_VAL" != "null" ]]; then
+                    MATCHED_CONFIG="$conf"
+                    break
+                fi
+            done
+        fi
+        
+        # Si después de consultar al servidor sigue habiendo ambigüedad o no se resolvió
+        if [[ -z "$MATCHED_CONFIG" ]]; then
+             echo -e "⚠️  \\x1b[33m[Agent Tunnel] Ambiguous configurations for this path:\\x1b[0m"
+             for conf in "${MATCHED_CONFIGS[@]}"; do
+                 echo "  - $(basename "$conf" .json)"
+             done
+             echo -e "\\x1b[33mPlease start the Bridge server and activate one, or delete the old config.\\x1b[0m"
+             echo -e "⚙️  Executing locally..."
+             eval "$@"
+             exit $?
+        fi
     fi
-done
+fi
 
 # --- LOGICA DE EXCLUSION ---
 if [[ -n "$MATCHED_CONFIG" ]]; then
@@ -110,9 +149,6 @@ STATUS_MSG=""
 if [[ -n "$SESSION_NAME" ]]; then
     VALID_SESSION=$(echo "$SESSION_NAME" | sed 's/ /-/g' | sed 's/[^a-zA-Z0-9_-]//g')
     
-    SESSIONS_JSON=$(curl -s --max-time 2 http://127.0.0.1:3456/api/sessions 2>/dev/null)
-    CURL_EXIT=$?
-
     if [[ $CURL_EXIT -eq 0 && -n "$SESSIONS_JSON" ]]; then
         ACTIVE_VAL=$(_gemini_parse_json "$SESSIONS_JSON" "activeSsh.$VALID_SESSION")
         if [[ -n "$ACTIVE_VAL" && "$ACTIVE_VAL" != "null" ]]; then
