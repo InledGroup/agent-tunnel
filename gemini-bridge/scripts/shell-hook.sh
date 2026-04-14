@@ -66,7 +66,7 @@ _gemini_bridge_check_path() {
     # 3. Comprobar si estamos en el proyecto activo (vía env)
     if [[ -n "$GEMINI_BRIDGE_HOST" && -n "$GEMINI_BRIDGE_PROJECT_ROOT" ]]; then
         local ROOT=$(_gemini_normalize_path "$GEMINI_BRIDGE_PROJECT_ROOT")
-        if [[ "$CURRENT_DIR" == "$ROOT"* ]]; then
+        if [[ "$CURRENT_DIR" == "$ROOT" || "$CURRENT_DIR" == "$ROOT"/* ]]; then
              # Verificar si el config .json existe para este proyecto
              # Si no hay config, se desactiva
              if [[ -f "$HOME/.gemini-bridge/configs/${GEMINI_BRIDGE_SESSION}.json" ]]; then
@@ -82,7 +82,7 @@ _gemini_bridge_check_path() {
         [ -e "$f" ] || continue
         local LP=$(_gemini_parse_json "$f" local_path)
         LP=$(_gemini_normalize_path "$LP")
-        [[ -n "$LP" && "$CURRENT_DIR" == "$LP"* ]] && return 0
+        [[ -n "$LP" ]] && [[ "$CURRENT_DIR" == "$LP" || "$CURRENT_DIR" == "$LP"/* ]] && return 0
     done
     return 1
 }

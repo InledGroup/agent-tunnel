@@ -68,7 +68,7 @@ else
         [ -e "$f" ] || continue
         LP=$(_gemini_parse_json "$f" local_path)
         LP=$(_gemini_normalize_path "$LP")
-        if [[ -n "$LP" && "$CURRENT_DIR" == "$LP"* ]]; then
+        if [[ -n "$LP" ]] && [[ "$CURRENT_DIR" == "$LP" || "$CURRENT_DIR" == "$LP"/* ]]; then
             MATCHED_CONFIGS+=("$f")
         fi
     done
