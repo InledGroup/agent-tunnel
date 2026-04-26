@@ -190,13 +190,13 @@ COMMAND="$*"
 
 # 4. Log al servidor de forma segura
 LOG_PAYLOAD=$(node -e "
-const data = { type: 'command', cmd: process.argv[1], path: process.argv[2] };
+const data = { type: 'command', cmd: process.argv[1], path: process.argv[2], session: process.argv[3] };
 console.log(JSON.stringify(data));
-" "$COMMAND" "$FINAL_REMOTE_PATH")
+" "$COMMAND" "$FINAL_REMOTE_PATH" "$SESSION_NAME")
 curl -s -X POST -H "Content-Type: application/json" -d "$LOG_PAYLOAD" http://127.0.0.1:3456/api/log > /dev/null
 
 # 5. Ejecución remota vía SSH
-# Intentar obtener llave personalizada de la config si existe
+NATIVE_SSH=$(_gemini_parse_json "$MATCHED_CONFIG" native_ssh)
 CUSTOM_KEY=$(_gemini_parse_json "$MATCHED_CONFIG" ssh_key)
 SSH_KEY="${CUSTOM_KEY:-$HOME/.ssh/id_ed25519_bridge}"
 
@@ -208,10 +208,16 @@ else
     SSH_OPTS="$SSH_OPTS -o BatchMode=yes"
 fi
 
-# Si la llave (personalizada o del bridge) existe, la añadimos como una de las identidades a intentar
-# Pero NO usamos IdentitiesOnly=yes para que ssh pueda usar otras llaves del agente o default
-if [ -f "$SSH_KEY" ]; then
-    SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
+if [[ "$NATIVE_SSH" == "true" ]]; then
+    # MODO NATIVO: No forzamos llave, ni usuario, ni puerto
+    SSH_TARGET="$HOST"
+else
+    # MODO STANDARD: Añadimos puerto, usuario y llave si existe
+    SSH_TARGET="$USER@$HOST"
+    SSH_OPTS="$SSH_OPTS -p $PORT"
+    if [ -f "$SSH_KEY" ]; then
+        SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
+    fi
 fi
 
 if [[ "$GEMINI_BRIDGE_HAS_MUTAGEN" == "true" ]]; then
@@ -222,7 +228,7 @@ fi
 
 if [[ "$FORCE_INTERACTIVE" == "true" ]]; then
     # MODO INTERACTIVO: Ejecución directa conectada a la terminal
-    ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" "$SSH_CMD"
+    ssh $SSH_OPTS "$SSH_TARGET" "$SSH_CMD"
     EXIT_CODE=$?
     OUTPUT="<Interactive Session (Output not captured)>"
     
@@ -233,7 +239,7 @@ if [[ "$FORCE_INTERACTIVE" == "true" ]]; then
     fi
 else
     # MODO NORMAL: Captura de output para logging
-    OUTPUT=$(ssh $SSH_OPTS -p "$PORT" "$USER@$HOST" "$SSH_CMD" 2>&1)
+    OUTPUT=$(ssh $SSH_OPTS "$SSH_TARGET" "$SSH_CMD" 2>&1)
     EXIT_CODE=$?
 
     if [[ $EXIT_CODE -eq 255 ]]; then
@@ -252,9 +258,9 @@ try {
 } catch (e) {
     exit_code = 1;
 }
-const data = { type: 'result', cmd: process.argv[1], exit_code: exit_code, output: process.argv[3] };
+const data = { type: 'result', cmd: process.argv[1], exit_code: exit_code, output: process.argv[3], session: process.argv[4] };
 console.log(JSON.stringify(data));
-" "$COMMAND" "$EXIT_CODE" "$OUTPUT")
+" "$COMMAND" "$EXIT_CODE" "$OUTPUT" "$SESSION_NAME")
 curl -s -X POST -H "Content-Type: application/json" -d "$RESULT_PAYLOAD" http://127.0.0.1:3456/api/log > /dev/null
 
 if [[ "$FORCE_INTERACTIVE" == "false" ]]; then

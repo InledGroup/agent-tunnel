@@ -7,20 +7,26 @@ echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Starting Development Mode..."
 echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Cleaning up ports 3456 & 4321..."
 lsof -ti :3456,4321 | xargs kill -9 2>/dev/null || true
 
-# 1. Levantar el Backend (API) en el puerto 3456
+# 1. Instalar dependencias del Backend si faltan
+if [ ! -d "gemini-bridge/node_modules" ]; then
+    echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Installing backend dependencies (ssh2, etc.)..."
+    cd gemini-bridge && npm install --silent && cd ..
+fi
+
+# 2. Instalar dependencias del Frontend si faltan
+if [ ! -d "gemini-bridge/frontend/node_modules" ]; then
+    echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Installing frontend dependencies (Astro, etc.)..."
+    cd gemini-bridge/frontend && npm install --silent && cd ../..
+fi
+
+# 3. Levantar el Backend (API) en el puerto 3456
 echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Starting Backend (Node.js)..."
 node gemini-bridge/server.js &
 BACKEND_PID=$!
 
-# 2. Instalar dependencias si no están (solo la primera vez)
-cd gemini-bridge/frontend
-if [ ! -d "node_modules" ]; then
-    echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Installing frontend dependencies..."
-    npm install --silent
-fi
-
-# 3. Levantar Astro en el puerto 4321
+# 4. Levantar Astro en el puerto 4321
 echo -e "\x1b[36m[Gemini Bridge]\x1b[0m Starting Frontend (Astro)..."
+cd gemini-bridge/frontend
 npm run dev -- --port 4321 &
 FRONTEND_PID=$!
 

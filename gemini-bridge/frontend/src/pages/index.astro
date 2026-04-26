@@ -114,6 +114,17 @@ import Layout from '../layouts/Layout.astro';
                             <span class="slider"></span>
                         </label>
                     </div>
+
+                    <div class="setting-item-inline">
+                        <div class="setting-info">
+                            <i class="fas fa-key"></i>
+                            <span>Native SSH Config (No Key Mgmt)</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-native-ssh">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
                     <div class="action-buttons-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px;">
                         <button id="btn-save" class="secondary-btn animate-hover">
                             <i class="fas fa-save"></i> Save Changes
@@ -194,10 +205,8 @@ import Layout from '../layouts/Layout.astro';
         const API_BASE = window.location.port === '4321' ? 'http://localhost:3456' : '';
         
         let sessions = {}, selLocal = '', selRemote = '', explorersData = { 'local-list': null, 'remote-list': null };
-        let currentStatus = { active: false, name: '' };
         let autoConnectTimer = null;
         let selectedSessionName = '';
-
         async function init() {
             lucide.createIcons();
             await loadSettings();
@@ -262,6 +271,26 @@ import Layout from '../layouts/Layout.astro';
                     autoBrowseRemote();
                 }
             };
+            
+            document.getElementById('toggle-native-ssh').onchange = (e) => {
+                const fields = ['user', 'pass', 'port'].map(id => document.getElementById(id).closest('.field'));
+                if (e.target.checked) {
+                    fields.forEach(f => {
+                        f.style.opacity = '0.4';
+                        f.style.pointerEvents = 'none';
+                        f.querySelector('input').placeholder = 'Configured in ~/.ssh/config';
+                    });
+                    document.getElementById('host').placeholder = 'e.g. skynet (SSH Alias)';
+                } else {
+                    fields.forEach(f => {
+                        f.style.opacity = '1';
+                        f.style.pointerEvents = 'auto';
+                        const id = f.querySelector('input').id;
+                        f.querySelector('input').placeholder = id === 'pass' ? '••••••••' : (id === 'user' ? 'root' : '22');
+                    });
+                    document.getElementById('host').placeholder = '192.168.1.1';
+                }
+            };
             document.querySelectorAll('.auto-connect').forEach(input => {
                 input.addEventListener('input', () => {
                     clearTimeout(autoConnectTimer);
@@ -307,10 +336,12 @@ import Layout from '../layouts/Layout.astro';
                 const line = document.createElement('div');
                 line.className = 'log-line';
                 let typeClass = 'sys', typeLabel = 'TUNNEL', content = data.output || data.cmd || data.message || '';
+                const sessionLabel = data.session ? `<span class="session-tag">[${data.session}]</span> ` : '';
+
                 if(data.type === 'command') { typeClass = 'exec'; typeLabel = 'REMOTE'; }
                 if(data.type === 'result') { typeClass = data.exit_code === 0 ? 'out' : 'err'; typeLabel = 'TRAFFIC'; }
                 if(data.type === 'error') { typeClass = 'err'; typeLabel = 'ERROR'; }
-                line.innerHTML = `<div class="log-type ${typeClass}">${typeLabel}</div><div class="log-content">${content.replace(/</g, '&lt;')}</div>`;
+                line.innerHTML = `<div class="log-type ${typeClass}">${typeLabel}</div><div class="log-content">${sessionLabel}${content.replace(/</g, '&lt;')}</div>`;
                 body.appendChild(line);
                 body.scrollTop = body.scrollHeight;
             };
@@ -322,36 +353,75 @@ import Layout from '../layouts/Layout.astro';
             renderSessionList();
         }
 
+        let globalSessionStatus = {};
+
         function renderSessionList() {
             const list = document.getElementById('session-list');
             list.innerHTML = '';
-            Object.keys(sessions).forEach(name => {
+            
+            // Ordenar sesiones para que las activas aparezcan arriba
+            const sortedNames = Object.keys(sessions).sort((a, b) => {
+                const statusA = globalSessionStatus[a]?.active ? 1 : 0;
+                const statusB = globalSessionStatus[b]?.active ? 1 : 0;
+                return statusB - statusA;
+            });
+
+            sortedNames.forEach(name => {
                 const s = sessions[name];
-                const isActive = currentStatus.name === name && currentStatus.active;
+                // Normalización robusta para coincidir con el servidor
+                const validName = name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
+                const status = globalSessionStatus[name] || globalSessionStatus[validName] || { status: 'offline', active: false };
+                
+                const isActive = status.active;
                 const isSelected = selectedSessionName === name;
                 
                 const div = document.createElement('div');
                 div.className = `session-card ${isActive ? 'active-session' : ''} ${isSelected ? 'active-ui' : ''}`;
+                
+                let statusClass = 'inactive';
+                if (status.status === 'active') statusClass = 'active';
+                if (status.status === 'syncing') statusClass = 'syncing';
+
                 div.innerHTML = `
                     <div class="session-info">
-                        ${isActive ? '<div class="active-dot"></div>' : '<div class="inactive-dot"></div>'}
+                        <div class="status-indicator ${statusClass}"></div>
                         <div class="session-text">
                             <span class="name">${name}</span>
-                            <span class="host">${s.user}@${s.host}</span>
+                            <span class="host">${s.user || (s.native_ssh ? 'Native' : 'root')}@${s.host}</span>
                         </div>
                     </div>
-                    <button class="btn-del" data-name="${name}"><i class="fas fa-times"></i></button>
+                    <div class="session-actions">
+                        ${isActive ? `<button class="btn-stop-mini" data-name="${name}" title="Stop Tunnel"><i class="fas fa-stop"></i></button>` : ''}
+                        <button class="btn-del" data-name="${name}" title="Delete Config"><i class="fas fa-trash"></i></button>
+                    </div>
                 `;
                 div.onclick = (e) => {
-                    if (e.target.closest('.btn-del')) return;
+                    if (e.target.closest('button')) return;
                     loadSession(name, div);
                 };
+                
+                const stopBtn = div.querySelector('.btn-stop-mini');
+                if (stopBtn) stopBtn.onclick = (e) => { e.stopPropagation(); stopBridgeSpecific(name); };
+                
                 div.querySelector('.btn-del').onclick = (e) => {
                     e.stopPropagation();
                     deleteSession(name);
                 };
                 list.appendChild(div);
             });
+        }
+
+        async function stopBridgeSpecific(name) {
+            if (!confirm(`Stop tunnel for "${name}"?`)) return;
+            try {
+                const r = await fetch(`${API_BASE}/api/stop-session`, { method: 'POST', body: JSON.stringify({ name }) });
+                const s = sessions[name];
+                if (s && s.local_path) {
+                    await fetch(`${API_BASE}/api/cleanup-local`, { method: 'POST', body: JSON.stringify({ local_path: s.local_path }) });
+                }
+                if (r.ok) showToast(`Tunnel "${name}" stopped`, 'success');
+                checkStatus();
+            } catch(e) { showToast('Error: ' + e.message, 'error'); }
         }
 
         function loadSession(name, element) {
@@ -364,9 +434,13 @@ import Layout from '../layouts/Layout.astro';
             document.getElementById('port').value = s.port || '22';
             document.getElementById('pass').value = s.password || '';
             document.getElementById('toggle-mutagen').checked = s.use_mutagen !== false;
+            document.getElementById('toggle-native-ssh').checked = s.native_ssh === true;
             document.getElementById('excluded_commands').value = s.excluded_commands || '';
             document.getElementById('exclude_mode').value = s.exclude_mode || 'prefix';
             
+            // Trigger visual state update
+            document.getElementById('toggle-native-ssh').onchange({ target: document.getElementById('toggle-native-ssh') });
+
             // Handle visual state of remote explorer based on mutagen toggle
             const remoteCont = document.getElementById('remote-container');
             const remoteSelEl = document.getElementById('remote-sel');
@@ -494,59 +568,45 @@ import Layout from '../layouts/Layout.astro';
                 const r = await fetch(`${API_BASE}/api/sessions`);
                 const data = await r.json();
                 const out = data.output || '';
-                const activeSsh = data.activeSsh || {};
+                const sessionStatus = data.sessionStatus || {};
+                globalSessionStatus = sessionStatus;
+
                 const dot = document.getElementById('status-dot');
                 const txt = document.getElementById('status-text');
                 const progBox = document.getElementById('sync-progress-box');
                 
-                const isWatching = out.includes("Status: Watching for changes");
-                const isStaging = out.includes("Status: Staging") || out.includes("Status: Synchronizing") || out.includes("Status: Reconciling");
-                const isActiveMutagen = out.includes("Name:");
+                // Actualizar indicadores globales basados en la sesión SELECCIONADA
+                const currentName = document.getElementById('session_name').value;
+                const status = sessionStatus[currentName] || { status: 'offline', active: false };
                 
-                // Comprobar si hay alguna sesión SSH activa manual (sin mutagen)
-                const currentSessionName = document.getElementById('session_name').value;
-                const validCurrentName = currentSessionName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
-                const isSshActive = activeSsh[validCurrentName] !== undefined;
-
-                const nameMatch = out.match(/Name: "([^"]+)"/);
-                const prevActive = currentStatus.active;
-                currentStatus.active = isActiveMutagen || isWatching || isStaging || isSshActive;
-                currentStatus.name = nameMatch ? nameMatch[1] : (isSshActive ? currentSessionName : '');
-
-                if (currentStatus.active && !prevActive) {
-                    showToast(`Tunnel "${currentStatus.name}" is now online`, 'success');
-                }
-
-                if (isWatching || (isSshActive && !isStaging)) {
+                if (status.status === 'active') {
                     dot.className = 'status-dot active'; 
-                    txt.innerText = isSshActive && !isActiveMutagen ? 'Stable Connection (SSH-Only)' : 'Stable Connection'; 
+                    txt.innerText = status.mutagen ? 'Stable Connection' : 'Stable Connection (SSH-Only)'; 
                     progBox.style.display = 'none';
-                } else if (isStaging) {
+                } else if (status.status === 'syncing') {
                     dot.className = 'status-dot syncing'; txt.innerText = 'Synchronizing...'; progBox.style.display = 'block';
                     
-                    const matchPercent = out.match(/(\d+)%/);
-                    const matchEntries = out.match(/(\d+\/\d+ entries)/) || out.match(/(\d+ entries)/);
-                    const statusMsg = out.match(/Status: ([^\n\(]+)/);
-                    const matchEta = out.match(/(\d+s|\d+m) remaining/);
-                    // Intentar capturar el nombre de archivo o acción específica si existe en los detalles
-                    const matchFile = out.match(/Applying changes: (?:[^\n]*)\(([^\)]+)\)/) || out.match(/Staging (?:files?|changes?): (?:[^\n]*)\(([^\)]+)\)/);
+                    const regex = new RegExp(`Name: "${currentName}"[\\s\\S]*?(?=Name: "|$)`, 'g');
+                    const match = out.match(regex);
+                    const sessionOut = match ? match[0] : '';
+
+                    const matchPercent = sessionOut.match(/(\d+)%/);
+                    const matchEntries = sessionOut.match(/(\d+\/\d+ entries)/) || sessionOut.match(/(\d+ entries)/);
+                    const statusMsg = sessionOut.match(/Status: ([^\n\(]+)/);
+                    const matchEta = sessionOut.match(/(\d+s|\d+m) remaining/);
+                    const matchFile = sessionOut.match(/Applying changes: (?:[^\n]*)\(([^\)]+)\)/) || sessionOut.match(/Staging (?:files?|changes?): (?:[^\n]*)\(([^\)]+)\)/);
 
                     if (matchPercent) { 
                         document.getElementById('sync-percent').innerText = matchPercent[0]; 
                         document.getElementById('sync-bar').style.width = matchPercent[0]; 
-                    } else { 
+                    } else {
                         document.getElementById('sync-percent').innerText = '...'; 
-                        document.getElementById('sync-bar').style.width = '100%'; 
+                        document.getElementById('sync-bar').style.width = '100%';
                     }
-                    
                     if (statusMsg) document.getElementById('sync-status-msg').innerText = statusMsg[1].trim();
                     if (matchEntries) document.getElementById('sync-details').innerText = matchEntries[0];
-                    
                     document.getElementById('sync-eta').innerText = matchEta ? `⏳ ${matchEta[0]}` : '';
                     document.getElementById('sync-file').innerText = matchFile ? matchFile[1] : '';
-
-                } else if (isActive) {
-                    dot.className = 'status-dot syncing'; txt.innerText = 'Establishing...'; progBox.style.display = 'block';
                 } else {
                     dot.className = 'status-dot'; txt.innerText = 'Offline'; progBox.style.display = 'none';
                 }
@@ -559,7 +619,10 @@ import Layout from '../layouts/Layout.astro';
         function updateStopButton() {
             const btnStop = document.getElementById('btn-stop');
             const currentInputName = document.getElementById('session_name').value;
-            if (currentStatus.active && currentStatus.name === currentInputName) {
+            const validName = currentInputName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
+            const status = globalSessionStatus[currentInputName] || globalSessionStatus[validName] || { active: false };
+            
+            if (status.active) {
                 btnStop.disabled = false;
                 btnStop.classList.add('active-danger');
             } else {
@@ -582,6 +645,7 @@ import Layout from '../layouts/Layout.astro';
                   port = document.getElementById('port').value || '22',
                   pass = document.getElementById('pass').value, 
                   useMutagen = document.getElementById('toggle-mutagen').checked,
+                  nativeSSH = document.getElementById('toggle-native-ssh').checked,
                   excludedCommands = document.getElementById('excluded_commands').value,
                   excludeMode = document.getElementById('exclude_mode').value;
 
@@ -602,6 +666,7 @@ import Layout from '../layouts/Layout.astro';
                         local_path: selLocal, 
                         remote_path: useMutagen ? selRemote : '/tmp/ssh-only', 
                         use_mutagen: useMutagen,
+                        native_ssh: nativeSSH,
                         excluded_commands: excludedCommands,
                         exclude_mode: excludeMode,
                         only_save: true
@@ -627,10 +692,11 @@ import Layout from '../layouts/Layout.astro';
                   port = document.getElementById('port').value || '22',
                   pass = document.getElementById('pass').value, 
                   useMutagen = document.getElementById('toggle-mutagen').checked,
+                  nativeSSH = document.getElementById('toggle-native-ssh').checked,
                   excludedCommands = document.getElementById('excluded_commands').value,
                   excludeMode = document.getElementById('exclude_mode').value;
 
-            if (!name || !host || !user || !selLocal || (useMutagen && !selRemote)) {
+            if (!name || !host || (!nativeSSH && !user) || !selLocal || (useMutagen && !selRemote)) {
                 showToast('Please fill all fields and select paths', 'error');
                 return;
             }
@@ -649,6 +715,7 @@ import Layout from '../layouts/Layout.astro';
                         local_path: selLocal, 
                         remote_path: configRemotePath, 
                         use_mutagen: useMutagen,
+                        native_ssh: nativeSSH,
                         excluded_commands: excludedCommands,
                         exclude_mode: excludeMode
                     }) 
@@ -698,14 +765,19 @@ import Layout from '../layouts/Layout.astro';
             const host = document.getElementById('host').value, 
                   user = document.getElementById('user').value, 
                   port = document.getElementById('port').value || '22',
-                  pass = document.getElementById('pass').value;
-            if (!host || !user) {
-                showToast('Enter host and user first', 'error');
+                  pass = document.getElementById('pass').value,
+                  nativeSSH = document.getElementById('toggle-native-ssh').checked;
+            if (!host || (!nativeSSH && !user)) {
+                showToast(nativeSSH ? 'Enter host/alias first' : 'Enter host and user first', 'error');
                 return;
             }
             const btn = document.getElementById('btn-test'); btn.disabled = true; btn.innerText = 'Checking...';
             try {
-                const r = await fetch(`${API_BASE}/api/test-ssh`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({host, user, port, password: pass}) });
+                const r = await fetch(`${API_BASE}/api/test-ssh`, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({host, user, port, password: pass, native_ssh: nativeSSH}) 
+                });
                 const data = await r.json();
                 if (data.status === 'success') {
                     showToast('SSH Access Confirmed!', 'success');
@@ -728,7 +800,11 @@ import Layout from '../layouts/Layout.astro';
             selectedSessionName = '';
             document.querySelectorAll('input:not([type=checkbox])').forEach(i => i.value=''); 
             document.getElementById('toggle-mutagen').checked = true;
+            document.getElementById('toggle-native-ssh').checked = false;
             
+            // Trigger visual state update
+            document.getElementById('toggle-native-ssh').onchange({ target: document.getElementById('toggle-native-ssh') });
+
             const remoteCont = document.getElementById('remote-container');
             const remoteSelEl = document.getElementById('remote-sel');
             remoteCont.classList.remove('disabled-explorer');
@@ -820,12 +896,21 @@ import Layout from '../layouts/Layout.astro';
     }
     
     .session-info { display: flex; align-items: center; gap: 10px; }
-    .active-dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; box-shadow: 0 0 8px var(--green); }
-    .inactive-dot { width: 8px; height: 8px; background: var(--border); border-radius: 50%; }
     
     .session-text .name { font-size: 13px; font-weight: 600; display: block; color: var(--text); }
     .session-text .host { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
     
+    .session-actions { display: flex; gap: 4px; }
+    
+    .session-tag { color: var(--accent); font-weight: 700; margin-right: 4px; }
+    
+    .btn-stop-mini {
+        background: rgba(239, 68, 68, 0.1); border: none; color: var(--red);
+        cursor: pointer; padding: 6px; font-size: 10px; transition: 0.2s;
+        border-radius: 4px; display: flex; align-items: center; justify-content: center;
+    }
+    .btn-stop-mini:hover { background: var(--red); color: white; }
+
     .btn-del { 
         background: none; border: none; color: var(--text-muted); 
         cursor: pointer; padding: 6px; font-size: 12px; transition: 0.2s;
@@ -833,6 +918,8 @@ import Layout from '../layouts/Layout.astro';
         display: flex; align-items: center; justify-content: center;
     }
     .btn-del:hover { color: var(--red); background: rgba(239, 68, 68, 0.1); }
+
+    .syncing-dot { animation: pulse 1s infinite; }
 
     /* Layout Main */
     main { 
@@ -997,10 +1084,33 @@ import Layout from '../layouts/Layout.astro';
     .toast { min-width: 250px; padding: 12px 20px; background: var(--surface); border-left: 4px solid var(--accent); border-radius: var(--radius); color: var(--text); box-shadow: 0 10px 25px rgba(0,0,0,0.4); display: flex; align-items: center; gap: 12px; font-size: 13px; animation: toastIn 0.3s ease-out forwards; }
     @keyframes toastIn { from { opacity: 0; transform: translateX(50px); } to { opacity: 1; transform: translateX(0); } }
 
-    .status-badge { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 8px; }
-    .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
-    .status-dot.active { background: var(--green); box-shadow: 0 0 12px var(--green); }
-    .status-dot.syncing { background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: pulse 1.5s infinite; }
+    /* Status Indicators */
+    .status-badge { 
+        display: flex; align-items: center; gap: 10px; padding: 10px 16px; 
+        background: var(--bg); border: 1px solid var(--border); 
+        border-radius: var(--radius); margin-top: 8px; 
+    }
+    
+    .status-dot, .status-indicator { 
+        width: 10px; height: 10px; border-radius: 50%; 
+        background: #444; flex-shrink: 0; transition: 0.3s; 
+    }
+
+    /* Estados de iluminación */
+    .status-dot.active, .status-indicator.active { 
+        background: #22c55e !important; 
+        box-shadow: 0 0 10px rgba(34, 197, 94, 0.8) !important; 
+    }
+    .status-dot.syncing, .status-indicator.syncing { 
+        background: #f97316 !important; 
+        box-shadow: 0 0 10px rgba(249, 115, 22, 0.8) !important; 
+        animation: pulse 1.5s infinite; 
+    }
+    .status-dot.inactive, .status-indicator.inactive { 
+        background: #444 !important; 
+        box-shadow: none !important; 
+    }
+
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
 
     .switch { position: relative; display: inline-block; width: 40px; height: 22px; }

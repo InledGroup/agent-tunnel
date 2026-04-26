@@ -220,6 +220,7 @@ const server = http.createServer((req, res) => {
             const validSessionName = originalSessionName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
             const configFile = path.join(CONFIGS_DIR, `${validSessionName}.json`);
             const useMutagen = config.use_mutagen !== false; // Default a true
+            const nativeSsh = config.native_ssh === true;
             const onlySave = config.only_save === true;
             
             if (onlySave) {
@@ -230,6 +231,8 @@ const server = http.createServer((req, res) => {
             }
 
             logEmitter.emit('log', { type: 'system', message: `🚀 Establishing Tunnel: ${originalSessionName} (${useMutagen ? 'SSH+Sync' : 'SSH-Only'})` });
+            if (nativeSsh) logEmitter.emit('log', { type: 'system', message: `🔌 Native SSH Mode: Using ~/.ssh/config for ${config.host}` });
+            
             fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
 
             // Inyectar archivos inmediatamente
@@ -238,6 +241,52 @@ const server = http.createServer((req, res) => {
                 logEmitter.emit('log', { type: 'system', message: `📝 Injected ${injectedFile} and activate.sh into local folder.` });
             }
 
+            // --- MODO NATIVO SSH ---
+            if (nativeSsh) {
+                const testCmd = `ssh -o BatchMode=yes -o ConnectTimeout=5 ${config.host} "echo 'success'"`;
+                logEmitter.emit('log', { type: 'system', message: `🔍 Testing Native SSH connection to ${config.host}...` });
+                
+                exec(testCmd, (testErr, testStdout) => {
+                    if (testErr || !testStdout.includes('success')) {
+                        logEmitter.emit('log', { type: 'error', message: `❌ Native SSH connection failed. Check your ~/.ssh/config for alias "${config.host}"` });
+                        res.writeHead(500); res.end(JSON.stringify({ status: 'error', message: 'Native SSH connection failed.' }));
+                        return;
+                    }
+
+                    if (!useMutagen) {
+                        logEmitter.emit('log', { type: 'system', message: '✅ Native SSH validated. SSH-Only Mode.' });
+                        activeSshSessions[validSessionName] = { host: config.host, nativeSsh: true, hasMutagen: false };
+                        res.writeHead(200); res.end(JSON.stringify({ status: 'success', message: 'Native SSH Connection established.' }));
+                        return;
+                    }
+
+                    logEmitter.emit('log', { type: 'system', message: '✅ Native SSH validated. Starting Mutagen...' });
+                    exec(`mutagen sync terminate "${validSessionName}"`, () => {
+                        // En modo nativo, mutagen usa simplemente 'ssh'
+                        const mutagenEnv = { ...process.env }; 
+                        const mutagenProc = spawn('mutagen', [
+                            'sync', 'create', `--name=${validSessionName}`,
+                            config.local_path, `${config.host}:${config.remote_path}`,
+                            '--sync-mode=two-way-resolved'
+                        ], { env: mutagenEnv });
+
+                        mutagenProc.on('close', (code) => {
+                            if (code === 0) {
+                                logEmitter.emit('log', { type: 'system', message: '🚀 Mutagen sync started (Native SSH).' });
+                                activeSshSessions[validSessionName] = { host: config.host, nativeSsh: true, hasMutagen: true };
+                                res.writeHead(200); res.end(JSON.stringify({ status: 'success' }));
+                            } else {
+                                logEmitter.emit('log', { type: 'error', message: `❌ Mutagen failed to start (Code ${code}).` });
+                                activeSshSessions[validSessionName] = { host: config.host, nativeSsh: true, hasMutagen: false, warning: true };
+                                res.writeHead(200); res.end(JSON.stringify({ status: 'warning', message: 'SSH OK, but Mutagen failed.' }));
+                            }
+                        });
+                    });
+                });
+                return;
+            }
+
+            // --- MODO STANDARD SSH (Con gestión de llaves) ---
             const pubKey = ensureSshKey();
             const conn = new Client();
             
@@ -433,6 +482,19 @@ const server = http.createServer((req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             const config = JSON.parse(body);
+            if (config.native_ssh) {
+                const testCmd = `ssh -o BatchMode=yes -o ConnectTimeout=5 ${config.host} "echo 'success'"`;
+                exec(testCmd, (err, stdout) => {
+                    if (!err && stdout.includes('success')) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' }); 
+                        res.end(JSON.stringify({ status: 'success' }));
+                    } else {
+                        res.writeHead(200, { 'Content-Type': 'application/json' }); 
+                        res.end(JSON.stringify({ status: 'error', message: err ? err.message : 'Connection failed' }));
+                    }
+                });
+                return;
+            }
             const conn = new Client();
             conn.on('ready', () => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'success' })); conn.end(); })
                 .on('error', (err) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'error', message: err.message })); })
@@ -493,8 +555,29 @@ const server = http.createServer((req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             const config = JSON.parse(body);
-            const conn = new Client();
             const target = config.remote_path || '/';
+
+            if (config.native_ssh) {
+                // Modo nativo: usamos ssh directo para ls -F (para identificar carpetas con /)
+                const lsCmd = `ssh -o BatchMode=yes ${config.host} "ls -F '${target}'"`;
+                exec(lsCmd, (err, stdout) => {
+                    if (err) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ dirs: [], current: target, error: err.message }));
+                        return;
+                    }
+                    const dirs = stdout.split('\n')
+                        .map(line => line.trim())
+                        .filter(line => line.endsWith('/'))
+                        .map(line => line.slice(0, -1))
+                        .sort();
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ dirs, current: target }));
+                });
+                return;
+            }
+
+            const conn = new Client();
             conn.on('ready', () => {
                 conn.sftp((err, sftp) => {
                     if (err || !sftp) return useLsFallback(conn, target, res);
@@ -514,9 +597,29 @@ const server = http.createServer((req, res) => {
     // Mutagen Sessions
     if (req.url === '/api/sessions') {
         getMutagenStatus().then(output => {
+            const configs = fs.readdirSync(CONFIGS_DIR).filter(f => f.endsWith('.json')).map(f => f.replace('.json', ''));
+            const sessionStatus = {};
+            
+            configs.forEach(name => {
+                // Normalizar nombre igual que cuando se crea la sesión
+                const validName = name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
+                const isActiveSsh = activeSshSessions[validName] !== undefined;
+                const mutagenMatch = output.includes(`Name: "${validName}"`);
+                const isWatching = mutagenMatch && output.includes("Status: Watching for changes");
+                const isStaging = mutagenMatch && (output.includes("Status: Staging") || output.includes("Status: Synchronizing") || output.includes("Status: Reconciling"));
+                
+                sessionStatus[name] = {
+                    active: isActiveSsh || mutagenMatch,
+                    ssh: isActiveSsh,
+                    mutagen: mutagenMatch,
+                    status: isStaging ? 'syncing' : (isWatching || isActiveSsh ? 'active' : 'offline')
+                };
+            });
+
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
                 activeSsh: activeSshSessions,
+                sessionStatus: sessionStatus,
                 output: output
             }));
         });
