@@ -1,0 +1,99 @@
+name: Build and Release Agent Tunnel
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    if: contains(github.event.head_commit.message, '[RELEASE]')
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: windows
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/checkout@v4
+        with:
+          node-version: 22
+
+      - name: Install System Dependencies (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm libarchive-tools
+
+      - name: Install Project Dependencies
+        run: |
+          cd gemini-bridge
+          npm install
+          cd frontend
+          npm install
+
+      - name: Build Frontend
+        run: |
+          cd gemini-bridge
+          npm run build:frontend
+
+      - name: Build Electron App
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd gemini-bridge
+          # Para Linux construimos deb y rpm en amd64 y arm64
+          if [ "${{ matrix.platform }}" == "linux" ]; then
+            npx electron-builder --linux deb rpm --x64 --arm64
+          # Para macOS construimos universal (Intel + Apple Silicon)
+          elif [ "${{ matrix.platform }}" == "macos" ]; then
+            npx electron-builder --mac --universal
+          # Para Windows construimos x64 y arm64
+          else
+            npx electron-builder --win --x64 --arm64
+          fi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}
+          path: gemini-bridge/dist-app/*
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.zip
+            artifacts/**/*.AppImage

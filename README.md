@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://hosted.inled.es/agent-tunnel-churro.png" alt="Agent Tunnel Logo" width="200"/>
+  <img src="https://hosted.inled.es/new-agent-tunnel.png" alt="Agent Tunnel Logo" width="200"/>
 </p>
 
 # Agent Tunnel 🚀

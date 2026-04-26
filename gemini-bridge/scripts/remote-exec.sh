@@ -200,7 +200,8 @@ NATIVE_SSH=$(_gemini_parse_json "$MATCHED_CONFIG" native_ssh)
 CUSTOM_KEY=$(_gemini_parse_json "$MATCHED_CONFIG" ssh_key)
 SSH_KEY="${CUSTOM_KEY:-$HOME/.ssh/id_ed25519_bridge}"
 
-SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+# Añadimos -q para evitar el warning de "Permanently added" y otros mensajes de log de SSH
+SSH_OPTS="-q -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 if [[ "$FORCE_INTERACTIVE" == "true" ]]; then
     SSH_OPTS="$SSH_OPTS -t"
@@ -209,10 +210,11 @@ else
 fi
 
 if [[ "$NATIVE_SSH" == "true" ]]; then
-    # MODO NATIVO: No forzamos llave, ni usuario, ni puerto
+    # MODO NATIVO: No forzamos llave, ni usuario, ni puerto. 
+    # SSH usará exclusivamente ~/.ssh/config para el alias "$HOST"
     SSH_TARGET="$HOST"
 else
-    # MODO STANDARD: Añadimos puerto, usuario y llave si existe
+    # MODO STANDARD: Añadimos puerto, usuario y llave específica del bridge
     SSH_TARGET="$USER@$HOST"
     SSH_OPTS="$SSH_OPTS -p $PORT"
     if [ -f "$SSH_KEY" ]; then

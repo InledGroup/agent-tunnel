@@ -37,7 +37,7 @@ import Layout from '../layouts/Layout.astro';
 
     <aside>
         <div class="logo">
-            <img src="https://hosted.inled.es/agent-tunnel-churro.png" alt="Agent Tunnel Logo" width="32" height="32" />
+            <img src="https://hosted.inled.es/new-agent-tunnel.png" alt="Agent Tunnel Logo" width="32" height="32" />
             <span>AGENT TUNNEL</span>
         </div>
 
@@ -488,19 +488,22 @@ import Layout from '../layouts/Layout.astro';
         }
 
         async function autoBrowseRemote() {
-            const host = document.getElementById('host').value, user = document.getElementById('user').value;
-            if (host && user && document.getElementById('toggle-mutagen').checked) browseRemote('/');
+            const host = document.getElementById('host').value, 
+                  user = document.getElementById('user').value,
+                  nativeSSH = document.getElementById('toggle-native-ssh').checked;
+            if (host && (user || nativeSSH) && document.getElementById('toggle-mutagen').checked) browseRemote('/');
         }
 
         async function browseRemote(path = '/') {
             const host = document.getElementById('host').value, 
                   user = document.getElementById('user').value, 
                   port = document.getElementById('port').value || '22',
-                  pass = document.getElementById('pass').value;
-            if (!host || !user || !document.getElementById('toggle-mutagen').checked) return;
+                  pass = document.getElementById('pass').value,
+                  nativeSSH = document.getElementById('toggle-native-ssh').checked;
+            if (!host || (!nativeSSH && !user) || !document.getElementById('toggle-mutagen').checked) return;
             document.getElementById('remote-spinner').style.display = 'block';
             try {
-                const r = await fetch(`${API_BASE}/api/ls-remote`, { method: 'POST', body: JSON.stringify({ host, user, port, password: pass, remote_path: path }) });
+                const r = await fetch(`${API_BASE}/api/ls-remote`, { method: 'POST', body: JSON.stringify({ host, user, port, password: pass, remote_path: path, native_ssh: nativeSSH }) });
                 const data = await r.json();
                 if (data.error) {
                     showToast(`Remote Error: ${data.error}`, 'error');

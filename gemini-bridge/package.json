@@ -1,17 +1,56 @@
 {
-  "name": "gemini-bridge",
+  "name": "agent-tunnel",
   "version": "1.0.0",
-  "description": "",
-  "main": "server.js",
+  "description": "Agent Tunnel - Transparent Remote Execution Bridge",
+  "main": "main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "electron": "electron .",
+    "electron:dev": "concurrently \"cd frontend && npm run dev\" \"wait-on http://localhost:4321 && electron .\"",
+    "build:frontend": "cd frontend && npm run build",
+    "build:app": "npm run build:frontend && electron-builder",
+    "postinstall": "cd frontend && npm install"
   },
   "keywords": [],
-  "author": "",
+  "author": "Jaime",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
     "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.agenttunnel.app",
+    "productName": "Agent Tunnel",
+    "directories": {
+      "output": "dist-app"
+    },
+    "files": [
+      "main.js",
+      "server.js",
+      "scripts/**/*",
+      "public/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "mac": {
+      "icon": "logo.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "icon": "logo.png"
+    },
+    "linux": {
+      "icon": "logo.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
   }
 }

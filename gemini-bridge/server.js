@@ -219,18 +219,18 @@ const server = http.createServer((req, res) => {
             const originalSessionName = config.session_name || 'agent-tunnel';
             const validSessionName = originalSessionName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
             const configFile = path.join(CONFIGS_DIR, `${validSessionName}.json`);
-            const useMutagen = config.use_mutagen !== false; // Default a true
-            const nativeSsh = config.native_ssh === true;
+            const useMutagen = config.use_mutagen !== false;
+            const nativeSsh = config.native_ssh === true || config.native_ssh === 'true';
             const onlySave = config.only_save === true;
             
             if (onlySave) {
-                logEmitter.emit('log', { type: 'system', message: `💾 Configuration saved: ${validSessionName}` });
+                logEmitter.emit('log', { type: 'system', message: `💾 Configuration saved: ${validSessionName} (Native: ${nativeSsh})` });
                 fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
                 res.writeHead(200); res.end(JSON.stringify({ status: 'success', message: 'Configuration saved.' }));
                 return;
             }
 
-            logEmitter.emit('log', { type: 'system', message: `🚀 Establishing Tunnel: ${originalSessionName} (${useMutagen ? 'SSH+Sync' : 'SSH-Only'})` });
+            logEmitter.emit('log', { type: 'system', message: `🚀 Establishing Tunnel: ${originalSessionName} [${nativeSsh ? 'NATIVE SSH' : 'STANDARD SSH'}] (${useMutagen ? 'SSH+Sync' : 'SSH-Only'})` });
             if (nativeSsh) logEmitter.emit('log', { type: 'system', message: `🔌 Native SSH Mode: Using ~/.ssh/config for ${config.host}` });
             
             fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
@@ -243,7 +243,7 @@ const server = http.createServer((req, res) => {
 
             // --- MODO NATIVO SSH ---
             if (nativeSsh) {
-                const testCmd = `ssh -o BatchMode=yes -o ConnectTimeout=5 ${config.host} "echo 'success'"`;
+                const testCmd = `ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ${config.host} "echo 'success'"`;
                 logEmitter.emit('log', { type: 'system', message: `🔍 Testing Native SSH connection to ${config.host}...` });
                 
                 exec(testCmd, (testErr, testStdout) => {
@@ -483,7 +483,7 @@ const server = http.createServer((req, res) => {
         req.on('end', () => {
             const config = JSON.parse(body);
             if (config.native_ssh) {
-                const testCmd = `ssh -o BatchMode=yes -o ConnectTimeout=5 ${config.host} "echo 'success'"`;
+                const testCmd = `ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 ${config.host} "echo 'success'"`;
                 exec(testCmd, (err, stdout) => {
                     if (!err && stdout.includes('success')) {
                         res.writeHead(200, { 'Content-Type': 'application/json' }); 
@@ -559,7 +559,7 @@ const server = http.createServer((req, res) => {
 
             if (config.native_ssh) {
                 // Modo nativo: usamos ssh directo para ls -F (para identificar carpetas con /)
-                const lsCmd = `ssh -o BatchMode=yes ${config.host} "ls -F '${target}'"`;
+                const lsCmd = `ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${config.host} "ls -F '${target}'"`;
                 exec(lsCmd, (err, stdout) => {
                     if (err) {
                         res.writeHead(200, { 'Content-Type': 'application/json' });
