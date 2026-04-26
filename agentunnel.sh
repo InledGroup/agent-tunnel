@@ -2,7 +2,7 @@
 # install-tunnel.sh - Cross-platform installer for Agent Tunnel
 # Works on macOS, Linux, and Windows (Git Bash/WSL)
 
-REPO_URL="https://github.com/jaime-online/agent-tunnel.git" # Ajusta si la URL cambia
+REPO_URL="https://github.com/InledGroup/agent-tunnel.git" # Ajusta si la URL cambia
 TARGET_DIR="agent-tunnel"
 
 # Colores para la terminal
