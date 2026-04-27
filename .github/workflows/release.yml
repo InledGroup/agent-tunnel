@@ -81,8 +81,7 @@ jobs:
             gemini-bridge/dist-app/*.AppImage
             gemini-bridge/dist-app/*.exe
             gemini-bridge/dist-app/*.zip
-            gemini-bridge/dist-app/*.yml
-          if-no-files-found: warn
+          if-no-files-found: error
 
   publish:
     needs: release
@@ -97,6 +96,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -107,5 +107,6 @@ jobs:
           name: Release v${{ github.run_number }}
           draft: false
           prerelease: false
-          files: artifacts/**/*
+          files: artifacts/*
+
 
