@@ -15,6 +15,10 @@
   "author": "Jaime",
   "license": "ISC",
   "type": "commonjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/InledGroup/agent-tunnel.git"
+  },
   "dependencies": {
     "ssh2": "^1.17.0"
   },
