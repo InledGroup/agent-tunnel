@@ -38,6 +38,7 @@
     "files": [
       "main.js",
       "server.js",
+      "logo.png",
       "scripts/**/*",
       "public/**/*",
       "package.json",

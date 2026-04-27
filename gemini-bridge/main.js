@@ -47,15 +47,25 @@ function createWindow() {
 
 function createTray() {
   const iconPath = path.join(__dirname, 'logo.png');
-  const image = nativeImage.createFromPath(iconPath);
+  let image = nativeImage.createFromPath(iconPath);
   
-  // En macOS el tray suele ser de 18x18, en Windows 16x16
+  if (image.isEmpty()) {
+    console.error("No se pudo cargar el icono del tray desde:", iconPath);
+    // Fallback simple si falla la carga
+    image = nativeImage.createEmpty();
+  }
+
+  // En macOS, marcar como template para que cambie de color (blanco/negro) automáticamente
+  if (process.platform === 'darwin') {
+    image.setTemplateImage(true);
+  }
+
   const trayIcon = image.resize({ width: 18, height: 18 });
   tray = new Tray(trayIcon);
   tray.setToolTip('Agent Tunnel');
 
   tray.on('click', () => {
-    mainWindow.show();
+    if (mainWindow) mainWindow.show();
   });
 
   updateTrayMenu();
