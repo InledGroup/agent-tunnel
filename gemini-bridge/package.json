@@ -1,7 +1,7 @@
 {
   "name": "agent-tunnel",
   "version": "1.0.0",
-  "description": "Agent Tunnel - Transparent Remote Execution Bridge",
+  "description": "Dale a tus agentes acceso a dispositivos remotos",
   "main": "main.js",
   "scripts": {
     "start": "node server.js",
@@ -12,7 +12,7 @@
     "postinstall": "cd frontend && npm install"
   },
   "keywords": [],
-  "author": "Jaime",
+  "author": "Inled Group <hi@inled.es>",
   "license": "ISC",
   "type": "commonjs",
   "repository": {
