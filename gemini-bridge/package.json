@@ -19,6 +19,7 @@
     "type": "git",
     "url": "https://github.com/InledGroup/agent-tunnel.git"
   },
+  "homepage": "https://github.com/InledGroup/agent-tunnel",
   "dependencies": {
     "ssh2": "^1.17.0"
   },

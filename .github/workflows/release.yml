@@ -59,9 +59,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd gemini-bridge
-          # Para Linux construimos deb y rpm en amd64 y arm64
+          # Para Linux construimos deb, rpm y AppImage en amd64 y arm64
           if [ "${{ matrix.platform }}" == "linux" ]; then
-            npx electron-builder --linux deb rpm --x64 --arm64
+            npx electron-builder --linux deb rpm AppImage --x64 --arm64
           # Para macOS construimos universal (Intel + Apple Silicon)
           elif [ "${{ matrix.platform }}" == "macos" ]; then
             npx electron-builder --mac --universal
@@ -74,11 +74,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.platform }}
-          path: gemini-bridge/dist-app/*
+          path: |
+            gemini-bridge/dist-app/*.deb
+            gemini-bridge/dist-app/*.rpm
+            gemini-bridge/dist-app/*.dmg
+            gemini-bridge/dist-app/*.AppImage
+            gemini-bridge/dist-app/*.exe
+            gemini-bridge/dist-app/*.zip
+            gemini-bridge/dist-app/*.yml
+          if-no-files-found: warn
 
   publish:
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -97,10 +107,5 @@ jobs:
           name: Release v${{ github.run_number }}
           draft: false
           prerelease: false
-          files: |
-            artifacts/**/*.deb
-            artifacts/**/*.rpm
-            artifacts/**/*.dmg
-            artifacts/**/*.exe
-            artifacts/**/*.zip
-            artifacts/**/*.AppImage
+          files: artifacts/**/*
+
