@@ -25,29 +25,33 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/checkout@v4
+        uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
+          cache-dependency-path: gemini-bridge/package.json
 
       - name: Install System Dependencies (Linux)
         if: matrix.platform == 'linux'
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y rpm libarchive-tools
 
       - name: Install Project Dependencies
+        shell: bash
         run: |
           cd gemini-bridge
           npm install
-          cd frontend
-          npm install
 
       - name: Build Frontend
+        shell: bash
         run: |
           cd gemini-bridge
           npm run build:frontend
 
       - name: Build Electron App
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
