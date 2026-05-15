@@ -35,8 +35,21 @@ syncScripts();
 // Ajustes iniciales
 let globalSettings = { 
     intercept_terminal: false,
-    instruction_filename: 'GEMINI.md' 
+    instruction_filename: 'GEMINI.md',
+    mutagen_path: '' 
 };
+
+// Corregir PATH en macOS para encontrar mutagen si está en Homebrew
+if (process.platform === 'darwin') {
+    const homebrewPath = os.arch() === 'arm64' ? '/opt/homebrew/bin' : '/usr/local/bin';
+    if (!process.env.PATH.includes(homebrewPath)) {
+        process.env.PATH = `${homebrewPath}:${process.env.PATH}`;
+    }
+}
+
+function getMutagenCommand() {
+    return globalSettings.mutagen_path || 'mutagen';
+}
 
 if (fs.existsSync(SETTINGS_FILE)) {
     try { 
@@ -56,8 +69,12 @@ async function getMutagenStatus() {
     if (NOW - mutagenCache.lastUpdate < 1000) return mutagenCache.output;
     
     return new Promise((resolve) => {
-        exec('mutagen sync list', (err, stdout) => {
-            mutagenCache.output = stdout || '';
+        exec(`${getMutagenCommand()} sync list`, (err, stdout) => {
+            if (err && err.code === 'ENOENT') {
+                mutagenCache.output = 'ERROR: Mutagen binary not found';
+            } else {
+                mutagenCache.output = stdout || '';
+            }
             mutagenCache.lastUpdate = Date.now();
             resolve(mutagenCache.output);
         });
@@ -106,23 +123,44 @@ fi
 
 echo -e "\\x1b[36m[Agent Tunnel]\\x1b[0m Environment activated: ${originalName}"
 echo -e "Remote target: ${config.user}@${config.host}"
+echo -e "Use --r=machine-name to target a specific machine if multiple are active."
 `.trim();
     
     fs.writeFileSync(path.join(targetDir, 'activate.sh'), activateContent);
     
     // 2. Crear archivo de instrucciones (GEMINI.md o similar)
+    // Buscamos todas las configuraciones que apunten a este mismo local_path
+    const allConfigs = fs.readdirSync(CONFIGS_DIR).filter(f => f.endsWith('.json'));
+    const relatedSessions = [];
+    for (const f of allConfigs) {
+        try {
+            const c = JSON.parse(fs.readFileSync(path.join(CONFIGS_DIR, f), 'utf8'));
+            if (c.local_path === targetDir) {
+                relatedSessions.push({
+                    name: f.replace('.json', ''),
+                    host: c.host,
+                    user: c.user,
+                    remote: c.remote_path
+                });
+            }
+        } catch(e) {}
+    }
+
     const instrFile = globalSettings.instruction_filename || 'GEMINI.md';
-    const mdContent = `
-# Agent Tunnel: ${originalName}
+    let mdContent = `
+# Agent Tunnel: Multi-Session Mode
 
-This project is configured to work on a remote environment via SSH transparently.
+This project is configured to work with multiple remote environments via SSH.
 
-## Active Configuration
-- **Host:** ${config.host}
-- **Port:** ${config.port || 22}
-- **User:** ${config.user}
-- **Remote Path:** ${config.remote_path}
-- **Sync Status:** ${hasMutagen ? 'ACTIVE (Real-time)' : 'DISABLED (Direct Mode)'}
+## Active Sessions in this Folder
+${relatedSessions.map(s => `- **${s.name}**: ${s.user || 'native'}@${s.host} -> ${s.remote}`).join('\n')}
+
+## How to target a specific machine
+You can use the \`--r=machine-name\` flag to direct your command to a specific machine.
+Example:
+\`\`\`bash
+${remoteExecPath} --r=${sessionName} "ls -la"
+\`\`\`
 
 ## Interception Rules (MANDATORY)
 **YOU ARE FORBIDDEN** from using direct commands like \`ls\`, \`npm start\`, \`mkdir\`, etc., if they are intended for the remote machine.
@@ -138,7 +176,7 @@ ${remoteExecPath} "your command here"
 ${remoteExecPath} --interactive "sudo apt update"
 \`\`\`
 
-All file operations performed locally will be synchronized to the remote machine automatically if Sync is ACTIVE.
+All file operations performed locally will be synchronized to the remote machine automatically if Sync is ACTIVE for that session.
 `.trim();
     
     fs.writeFileSync(path.join(targetDir, instrFile), mdContent);
@@ -217,7 +255,7 @@ const server = http.createServer((req, res) => {
         req.on('end', () => {
             const config = JSON.parse(body);
             const originalSessionName = config.session_name || 'agent-tunnel';
-            const validSessionName = originalSessionName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
+            const validSessionName = originalSessionName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
             const configFile = path.join(CONFIGS_DIR, `${validSessionName}.json`);
             const useMutagen = config.use_mutagen !== false;
             const nativeSsh = config.native_ssh === true || config.native_ssh === 'true';
@@ -236,7 +274,7 @@ const server = http.createServer((req, res) => {
             fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
 
             // Inyectar archivos inmediatamente
-            const injectedFile = generateActivationFiles(validSessionName, config, originalSessionName, false);
+            const injectedFile = generateActivationFiles(validSessionName, config, originalSessionName, useMutagen);
             if (injectedFile) {
                 logEmitter.emit('log', { type: 'system', message: `📝 Injected ${injectedFile} and activate.sh into local folder.` });
             }
@@ -261,14 +299,22 @@ const server = http.createServer((req, res) => {
                     }
 
                     logEmitter.emit('log', { type: 'system', message: '✅ Native SSH validated. Starting Mutagen...' });
-                    exec(`mutagen sync terminate "${validSessionName}"`, () => {
+                    exec(`${getMutagenCommand()} sync terminate "${validSessionName}"`, () => {
                         // En modo nativo, mutagen usa simplemente 'ssh'
                         const mutagenEnv = { ...process.env }; 
-                        const mutagenProc = spawn('mutagen', [
+                        const mutagenProc = spawn(getMutagenCommand(), [
                             'sync', 'create', `--name=${validSessionName}`,
                             config.local_path, `${config.host}:${config.remote_path}`,
                             '--sync-mode=two-way-resolved'
                         ], { env: mutagenEnv });
+
+                        mutagenProc.on('error', (err) => {
+                            if (err.code === 'ENOENT') {
+                                logEmitter.emit('log', { type: 'error', message: `❌ Mutagen NOT FOUND. Please install it or set path in Settings. (Tried: ${getMutagenCommand()})` });
+                            } else {
+                                logEmitter.emit('log', { type: 'error', message: `❌ Mutagen spawn error: ${err.message}` });
+                            }
+                        });
 
                         mutagenProc.on('close', (code) => {
                             if (code === 0) {
@@ -346,13 +392,21 @@ const server = http.createServer((req, res) => {
                             }
 
                             logEmitter.emit('log', { type: 'system', message: '✅ Key validated. Starting Mutagen...' });
-                            exec(`mutagen sync terminate "${validSessionName}"`, () => {
+                            exec(`${getMutagenCommand()} sync terminate "${validSessionName}"`, () => {
                                 const mutagenEnv = { ...process.env, MUTAGEN_SSH_PATH: `ssh ${compatOpts} -p ${config.port || 22}` };
-                                const mutagenProc = spawn('mutagen', [
+                                const mutagenProc = spawn(getMutagenCommand(), [
                                     'sync', 'create', `--name=${validSessionName}`,
                                     config.local_path, `${config.user}@${config.host}:${config.remote_path}`,
                                     '--sync-mode=two-way-resolved'
                                 ], { env: mutagenEnv });
+
+                                mutagenProc.on('error', (err) => {
+                                    if (err.code === 'ENOENT') {
+                                        logEmitter.emit('log', { type: 'error', message: `❌ Mutagen NOT FOUND. (Tried: ${getMutagenCommand()})` });
+                                    } else {
+                                        logEmitter.emit('log', { type: 'error', message: `❌ Mutagen spawn error: ${err.message}` });
+                                    }
+                                });
 
                                 mutagenProc.on('close', (code) => {
                                     const success = (code === 0);
@@ -409,7 +463,7 @@ const server = http.createServer((req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             const { name, id } = JSON.parse(body);
-            const identifier = id || name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
+            const identifier = id || name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
             
             logEmitter.emit('log', { type: 'system', message: `🛑 Terminating tunnel: ${name}...` });
             
@@ -425,10 +479,14 @@ const server = http.createServer((req, res) => {
                 return;
             }
 
-            exec(`mutagen sync terminate "${identifier}"`, (err, stdout, stderr) => {
+            exec(`${getMutagenCommand()} sync terminate "${identifier}"`, (err, stdout, stderr) => {
                 // Si el error es simplemente que la sesión no existe, lo tratamos como éxito
                 if (err && !(stderr && stderr.includes("unable to locate requested sessions"))) {
-                    logEmitter.emit('log', { type: 'error', message: `❌ Mutagen error: ${stderr || err.message}` });
+                    if (err.code === 'ENOENT') {
+                         logEmitter.emit('log', { type: 'error', message: `❌ Mutagen NOT FOUND during cleanup.` });
+                    } else {
+                        logEmitter.emit('log', { type: 'error', message: `❌ Mutagen error: ${stderr || err.message}` });
+                    }
                     res.writeHead(500); res.end(JSON.stringify({ status: 'error', message: stderr || err.message }));
                 } else {
                     logEmitter.emit('log', { type: 'system', message: `✨ Tunnel stopped.` });
@@ -602,7 +660,7 @@ const server = http.createServer((req, res) => {
             
             configs.forEach(name => {
                 // Normalizar nombre igual que cuando se crea la sesión
-                const validName = name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
+                const validName = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
                 const isActiveSsh = activeSshSessions[validName] !== undefined;
                 const mutagenMatch = output.includes(`Name: "${validName}"`);
                 const isWatching = mutagenMatch && output.includes("Status: Watching for changes");
@@ -628,9 +686,14 @@ const server = http.createServer((req, res) => {
 
     // Nuevo endpoint para los logs de mutagen (pesado)
     if (req.url === '/api/mutagen-status') {
-        exec('mutagen sync list', (err, stdout) => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ output: stdout || '' }));
+        exec(`${getMutagenCommand()} sync list`, (err, stdout) => {
+            if (err && err.code === 'ENOENT') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ output: 'ERROR: Mutagen binary not found' }));
+            } else {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ output: stdout || '' }));
+            }
         });
         return;
     }

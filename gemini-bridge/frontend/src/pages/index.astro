@@ -149,6 +149,10 @@ import Layout from '../layouts/Layout.astro';
                             <label>Instruction Filename</label>
                             <input id="instruction_filename" placeholder="GEMINI.md" style="font-family:'JetBrains Mono';">
                         </div>
+                        <div class="field">
+                            <label>Mutagen Path (Optional)</label>
+                            <input id="mutagen_path" placeholder="Default: mutagen" style="font-family:'JetBrains Mono';">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -254,6 +258,7 @@ import Layout from '../layouts/Layout.astro';
             document.getElementById('hide-loading-btn').onclick = () => document.getElementById('loading-overlay').style.display = 'none';
             document.getElementById('toggle-intercept').onchange = updateSettings;
             document.getElementById('instruction_filename').onchange = updateSettings;
+            document.getElementById('mutagen_path').onchange = updateSettings;
 
             document.getElementById('toggle-mutagen').onchange = (e) => {
                 const remoteCont = document.getElementById('remote-container');
@@ -315,12 +320,17 @@ import Layout from '../layouts/Layout.astro';
             const settings = await r.json();
             document.getElementById('toggle-intercept').checked = settings.intercept_terminal;
             document.getElementById('instruction_filename').value = settings.instruction_filename || 'GEMINI.md';
+            document.getElementById('mutagen_path').value = settings.mutagen_path || '';
         }
 
         async function updateSettings() {
             const intercept_terminal = document.getElementById('toggle-intercept').checked;
             const instruction_filename = document.getElementById('instruction_filename').value || 'GEMINI.md';
-            await fetch(`${API_BASE}/api/settings`, { method: 'POST', body: JSON.stringify({ intercept_terminal, instruction_filename }) });
+            const mutagen_path = document.getElementById('mutagen_path').value || '';
+            await fetch(`${API_BASE}/api/settings`, { 
+                method: 'POST', 
+                body: JSON.stringify({ intercept_terminal, instruction_filename, mutagen_path }) 
+            });
             showToast('Settings saved', 'info');
         }
 
@@ -369,7 +379,7 @@ import Layout from '../layouts/Layout.astro';
             sortedNames.forEach(name => {
                 const s = sessions[name];
                 // Normalización robusta para coincidir con el servidor
-                const validName = name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
+                const validName = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
                 const status = globalSessionStatus[name] || globalSessionStatus[validName] || { status: 'offline', active: false };
                 
                 const isActive = status.active;
@@ -622,7 +632,7 @@ import Layout from '../layouts/Layout.astro';
         function updateStopButton() {
             const btnStop = document.getElementById('btn-stop');
             const currentInputName = document.getElementById('session_name').value;
-            const validName = currentInputName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
+            const validName = currentInputName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, '');
             const status = globalSessionStatus[currentInputName] || globalSessionStatus[validName] || { active: false };
             
             if (status.active) {

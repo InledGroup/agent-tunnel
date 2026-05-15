@@ -43,10 +43,21 @@ _gemini_normalize_path() {
 
 # --- PARSE FLAGS ---
 FORCE_INTERACTIVE=false
-if [[ "$1" == "--interactive" || "$1" == "-it" ]]; then
-    FORCE_INTERACTIVE=true
-    shift
-fi
+REQUESTED_SESSION=""
+
+while [[ "$1" == -* ]]; do
+    if [[ "$1" == "--interactive" || "$1" == "-it" ]]; then
+        FORCE_INTERACTIVE=true
+        shift
+    elif [[ "$1" == --r=* ]]; then
+        REQUESTED_SESSION="${1#--r=}"
+        # Normalizar igual que el servidor
+        REQUESTED_SESSION=$(echo "$REQUESTED_SESSION" | tr '[:upper:]' '[:lower:]' | sed 's/ /-/g' | sed 's/[^a-zA-Z0-9_-]//g')
+        shift
+    else
+        break
+    fi
+done
 
 # --- DETECCIÓN DE CONFIGURACIÓN ---
 CURRENT_DIR=$(_gemini_normalize_path "$(pwd)")
@@ -58,8 +69,11 @@ CURL_EXIT=$?
 
 MATCHED_CONFIG=""
 
-# Prioridad 0: Si ya tenemos una sesión forzada por variables de entorno, la usamos directamente
-if [[ -n "$GEMINI_BRIDGE_SESSION" && -f "$CONFIGS_DIR/${GEMINI_BRIDGE_SESSION}.json" ]]; then
+# Prioridad 0: Si el usuario pidió una sesión específica por flag
+if [[ -n "$REQUESTED_SESSION" && -f "$CONFIGS_DIR/${REQUESTED_SESSION}.json" ]]; then
+    MATCHED_CONFIG="$CONFIGS_DIR/${REQUESTED_SESSION}.json"
+# Prioridad 0.1: Si ya tenemos una sesión forzada por variables de entorno
+elif [[ -n "$GEMINI_BRIDGE_SESSION" && -f "$CONFIGS_DIR/${GEMINI_BRIDGE_SESSION}.json" ]]; then
     MATCHED_CONFIG="$CONFIGS_DIR/${GEMINI_BRIDGE_SESSION}.json"
 else
     # Prioridad 1: Buscar si el directorio actual coincide con alguna config guardada
@@ -80,7 +94,7 @@ else
         if [[ $CURL_EXIT -eq 0 && -n "$SESSIONS_JSON" ]]; then
             for conf in "${MATCHED_CONFIGS[@]}"; do
                 S_NAME=$(basename "$conf" .json)
-                VALID_S=$(echo "$S_NAME" | sed 's/ /-/g' | sed 's/[^a-zA-Z0-9_-]//g')
+                VALID_S=$(echo "$S_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/ /-/g' | sed 's/[^a-zA-Z0-9_-]//g')
                 ACTIVE_VAL=$(_gemini_parse_json "$SESSIONS_JSON" "activeSsh.$VALID_S")
                 if [[ -n "$ACTIVE_VAL" && "$ACTIVE_VAL" != "null" ]]; then
                     MATCHED_CONFIG="$conf"
@@ -95,7 +109,7 @@ else
              for conf in "${MATCHED_CONFIGS[@]}"; do
                  echo "  - $(basename "$conf" .json)"
              done
-             echo -e "\\x1b[33mPlease start the Bridge server and activate one, or delete the old config.\\x1b[0m"
+             echo -e "\\x1b[33mPlease use --r=machine-name to specify one, or activate one in the UI.\\x1b[0m"
              echo -e "⚙️  Executing locally..."
              eval "$@"
              exit $?
@@ -154,7 +168,7 @@ IS_ACTIVE="false"
 STATUS_MSG=""
 
 if [[ -n "$SESSION_NAME" ]]; then
-    VALID_SESSION=$(echo "$SESSION_NAME" | sed 's/ /-/g' | sed 's/[^a-zA-Z0-9_-]//g')
+    VALID_SESSION=$(echo "$SESSION_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/ /-/g' | sed 's/[^a-zA-Z0-9_-]//g')
     
     if [[ $CURL_EXIT -eq 0 && -n "$SESSIONS_JSON" ]]; then
         ACTIVE_VAL=$(_gemini_parse_json "$SESSIONS_JSON" "activeSsh.$VALID_SESSION")
